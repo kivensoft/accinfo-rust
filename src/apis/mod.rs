@@ -1,6 +1,7 @@
-mod proxy;
-pub use proxy::default_handler;
-pub use proxy::set_proxy_addr;
+mod web;
+pub use web::default_handler;
 
-mod ping;
-pub use ping::ping;
+mod service;
+pub use service::ping;
+pub use service::login;
+pub use service::list;

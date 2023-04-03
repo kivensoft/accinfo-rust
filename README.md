@@ -1,9 +1,9 @@
 # mapigw -- mini api gateway
-简单快速的api网关
+账户信息管理系统
 
 ---
 #### 项目地址
-<https://github.com/kivensoft/mapigw>
+<https://gitee.com/kivensoft/accinfo_rust>
 
 ###### 技术框架
 - rust 1.65+ 媲美C语言的强类型开发语言
@@ -21,8 +21,8 @@
 
 ---
 ###### 源代码下载
-`git clone git@github.com:kivensoft/mapigw.git`
+`git clone git@github.com:kivensoft/accinfo_rust.git`
 ###### 编译
 `cargo build`
 ###### 运行
-`mapigw`
+`accinfo`

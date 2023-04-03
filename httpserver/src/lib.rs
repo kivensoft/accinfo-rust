@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use bytes::Buf;
+use hyper::body::Buf;
 use serde::{Serialize, Deserialize, de::DeserializeOwned};
 use anyhow::Result;
 
 #[macro_export]
-macro_rules! httpserver_register {
+macro_rules! register_apis {
     ($server:expr, $base:literal, $($path:literal : $handler:expr,)+) => {
         $($server.register(concat!($base, $path), $handler); )*
     };
@@ -20,6 +20,18 @@ macro_rules! decode_json {
         }
     };
 }
+
+#[macro_export]
+macro_rules! check_required {
+    ($val:expr, $($attr:tt),+) => {
+        $(
+            if $val.$attr.is_none() {
+                return $crate::ResBuiler::fail(&format!("{} can't be null", stringify!($attr)));
+            }
+        )*
+    };
+}
+
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -42,27 +54,25 @@ pub struct HttpContext {
 
 impl HttpContext {
 
-    #[allow(dead_code)]
     pub async fn into_json<T: DeserializeOwned>(self) -> Result<T> {
         let body = hyper::body::aggregate(self.req).await?;
         match serde_json::from_reader(body.reader()) {
             Ok(v) => Ok(v),
             Err(e) => {
-                log::error!("decode http body to json error: {e:?}");
-                anyhow::bail!("解析请求的json参数错误")
+                log::info!("decode http body to json error: {e:?}");
+                anyhow::bail!("parse request data failed")
             },
         }
     }
 
-    #[allow(dead_code)]
     pub async fn into_option_json<T: DeserializeOwned>(self) -> Result<Option<T>> {
         let body = hyper::body::aggregate(self.req).await?;
         if body.remaining() > 0 {
             match serde_json::from_reader(body.reader()) {
                 Ok(v) => Ok(Some(v)),
                 Err(e) => {
-                    log::error!("decode http body to json error: {e:?}");
-                    anyhow::bail!("解析请求的json参数错误")
+                    log::info!("decode http body to json error: {e:?}");
+                    anyhow::bail!("parse request data failed")
                 },
             }
         } else {
@@ -82,26 +92,33 @@ impl ResBuiler {
 
     pub fn resp(status: hyper::StatusCode, body: hyper::Body) -> Result<Response> {
         hyper::Response::builder()
-            .status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
             .status(status)
             .header("Content-Type", "applicatoin/json; charset=UTF-8")
             .body(body)
-            .map_err(|e| anyhow::Error::new(e).context("resp"))
+            .map_err(|e| anyhow::anyhow!(e))
     }
 
-    #[allow(dead_code)]
+    pub fn resp_ok(body: hyper::Body) -> Result<Response> {
+        hyper::Response::builder()
+            .header("Content-Type", "applicatoin/json; charset=UTF-8")
+            .body(body)
+            .map_err(|e| anyhow::anyhow!(e))
+    }
+
     pub fn ok_with_empty() -> Result<Response> {
-        Self::resp(hyper::StatusCode::OK, hyper::Body::from(r#"{"code":200}"#))
+        Self::resp_ok(hyper::Body::from(r#"{"code":200}"#))
     }
 
-    #[allow(dead_code)]
     pub fn ok<T: ?Sized + Serialize>(data: &T) -> Result<Response> {
-        Self::resp(hyper::StatusCode::OK, to_json_body!({"code": 200, "data": data}))
+        Self::resp_ok(to_json_body!({"code": 200, "data": data}))
     }
 
-    #[allow(dead_code)]
-    pub fn fail(code: u32, message: &str) -> Result<Response> {
-        Self::fail_with_status(hyper::StatusCode::INTERNAL_SERVER_ERROR, code, message)
+    pub fn fail(message: &str) -> Result<Response> {
+        Self::fail_with_code(500, message)
+    }
+
+    pub fn fail_with_code(code: u32, message: &str) -> Result<Response> {
+        Self::resp_ok(to_json_body!({"code": code, "message": message}))
     }
 
     pub fn fail_with_status(status: hyper::StatusCode, code: u32, message: &str) -> Result<Response> {
@@ -162,14 +179,11 @@ impl HttpMiddleware for AccessLog {
         let path = ctx.req.uri().path().to_string();
 
         let res = next.run(ctx).await;
+        let ms = start.elapsed().as_millis();
         match &res {
-            Ok(res) => log::debug!("{} {} {} {} {}ms",
-                method,
-                ansicolor::ac_blue!(path),
-                ansicolor::ac_yellow!(res.status().as_str()),
-                remote_addr,
-                start.elapsed().as_millis()),
-            Err(e)  => log::error!("{method} {path} error: {}", ansicolor::ac_red!(e)),
+            Ok(res) => log::debug!("{method} \x1b[34m{path} \x1b[33m{} \x1b[36m{ms}\x1b[0mms client: {remote_addr}",
+                res.status().as_str()),
+            Err(e)  => log::error!("{method} \x1b[34m{path} \x1b[36m{ms}\x1b[0mms error: \x1b[31m{e}\x1b[0m"),
         };
 
         res
@@ -196,7 +210,6 @@ impl HttpServer {
         }
     }
 
-    #[allow(dead_code)]
     pub fn default_handler(&mut self, handler: impl HttpHandler) {
         self.default_handler = Box::new(handler);
     }
@@ -216,7 +229,6 @@ impl HttpServer {
     /// Arguments:
     ///
     /// * `middleware`: 中间件对象
-    #[allow(dead_code)]
     pub fn middleware(&mut self, middleware: impl HttpMiddleware) {
         self.middlewares.push(Arc::new(middleware));
     }
@@ -268,16 +280,17 @@ impl HttpServer {
         });
 
         let server = hyper::Server::bind(&addr).serve(make_svc);
-        log::info!("启动http服务成功, 监听地址: {}", ansicolor::ac_blue!(addr));
+        log::info!("Started http server on \x1b[34m{addr}\x1b[0m");
 
-        server.await.map_err(|e| anyhow::Error::new(e).context("http服务运行错误"))
+        server.await.map_err(|e| anyhow::Error::new(e).context("http server running error"))
     }
 
     async fn handle_not_found(_ctx: HttpContext) -> Result<Response> {
-        ResBuiler::fail_with_status(hyper::StatusCode::NOT_FOUND, 404, "服务未找到")
+        ResBuiler::fail_with_status(hyper::StatusCode::NOT_FOUND, 404, "Not Found")
     }
 
     fn handle_error(err: anyhow::Error) -> Response {
-        ResBuiler::fail(hyper::StatusCode::INTERNAL_SERVER_ERROR.as_u16() as u32, &format!("{err}")).unwrap()
+        ResBuiler::fail(&err.to_string()).unwrap()
     }
+
 }
