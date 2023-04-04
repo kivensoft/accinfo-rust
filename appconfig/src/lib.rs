@@ -21,6 +21,8 @@ impl Config {
 /// ## Examples
 ///
 /// ```rust
+/// use appconfig;
+///
 /// appconfig::appconfig_define!(AppConf,
 ///     log_level: String => ["L",  "log-level", "LogLevel", "log level(trace/debug/info/warn/error/off)"],
 ///     log_file : String => ["F",  "log-file", "LogFile", "log filename"],
@@ -42,7 +44,7 @@ impl Config {
 /// }
 ///
 /// let mut ac = AppConf::default();
-/// if !appconfig::parse_args(&ac, "example application")? {
+/// if !appconfig::parse_args(&mut ac, "example application").unwrap();
 ///     return;
 /// }
 /// ```
@@ -92,13 +94,17 @@ macro_rules! appconfig_define {
     };
     (@get_cfg_value $cfg: expr, $name: expr, $out_val: expr, bool) => {
         if let Ok(s) = $cfg.get_str($name) {
-            $out_val = s.to_lowercase() == "true";
+            if let Some(s) = s {
+                $out_val = s.to_lowercase() == "true";
+            }
         }
     };
     (@get_cfg_value $cfg: expr, $name: expr, $out_val: expr, $t:ty) => {
         if let Ok(s) = $cfg.get_str($name) {
-            $out_val = s.parse::<$t>().with_context(
-                || format!("app config file key {} is not a number", $name))?;
+            if let Some(s) = s {
+                $out_val = s.parse::<$t>().with_context(
+                    || format!("app config file key {} is not a number", $name))?;
+            }
         }
     };
 
