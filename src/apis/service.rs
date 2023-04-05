@@ -1,9 +1,11 @@
 use anyhow::Result;
-use httpserver::{HttpContext, ResBuiler, Response};
+use httpserver::{HttpContext, ResBuiler, Response, LocalDateTime};
 use serde::{Serialize, Deserialize};
 
 use crate::aidb;
-use crate::date_format;
+
+const ISSUER: &str = "accinfo";
+const EXP_SECS: i64 = 30 * 60;
 
 pub async fn ping(ctx: HttpContext) -> Result<Response> {
     #[derive(Deserialize)] struct ReqParam { reply: Option<String> }
@@ -12,11 +14,10 @@ pub async fn ping(ctx: HttpContext) -> Result<Response> {
     struct ResData {
         reply: String,
         server: String,
-        #[serde(with = "date_format")]
-        now: chrono::DateTime<chrono::Local>,
+        now: LocalDateTime,
     }
 
-    let now = chrono::Local::now();
+    let now = LocalDateTime::now();
     let server = format!("{}/{}", crate::APP_NAME, crate::APP_VER);
     let reply = match ctx.into_option_json::<ReqParam>().await? {
         Some(ping_params) => ping_params.reply,
@@ -36,26 +37,27 @@ pub async fn login(ctx: HttpContext) -> Result<Response> {
     #[derive(Serialize)]
     struct ResData {
         token: String,
-        expire: chrono::DateTime<chrono::Local>,
+        expire: LocalDateTime,
     }
 
     let req_param = ctx.into_json::<ReqParam>().await?;
     httpserver::check_required!(req_param, user, pass);
+    let (user, pass) = (req_param.user.unwrap(), req_param.pass.unwrap());
     let ac = crate::AppConf::get();
     let fpath = std::path::Path::new(&ac.database);
     let username = fpath.file_stem().unwrap();
 
-    if !fpath.exists() || username.to_str().unwrap() != req_param.user.unwrap().as_str() {
+    if !fpath.exists() || username.to_str().unwrap() != &user {
         return ResBuiler::fail("无效的用户名");
     }
-    if !crate::aidb::check_password(&ac.database, &req_param.pass.unwrap())? {
+    if !crate::aidb::check_password(&ac.database, &pass)? {
         return ResBuiler::fail("无效的密码")
     }
 
-    ResBuiler::ok(&ResData {
-        token: "12345678".to_string(),
-        expire: chrono::Local::now(),
-    })
+    let token = jwt::encode_with_rsa(&serde_json::json!({"user": user}), ISSUER, EXP_SECS as u64)?;
+    let expire = LocalDateTime::from(chrono::Local::now() + chrono::Duration::seconds(EXP_SECS));
+
+    ResBuiler::ok(&ResData { token, expire })
 }
 
 
