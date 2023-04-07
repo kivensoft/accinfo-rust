@@ -1,5 +1,6 @@
-# mapigw -- mini api gateway
+# accinfo
 账户信息管理系统
+account infomation manager system
 
 ---
 #### 项目地址
@@ -18,6 +19,7 @@
 - asynclog 简单的异步日志库，采用独立线程进行日志输出
 - ansicolor 终端支持的ansi颜色扩展库
 - appconfig 命令行参数及配置文件参数解析库
+- httpserver 迷你的http server库
 
 ---
 ###### 源代码下载
