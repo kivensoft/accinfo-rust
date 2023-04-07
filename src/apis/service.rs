@@ -1,11 +1,13 @@
+use std::sync::{Mutex, Arc};
+
 use anyhow::Result;
-use httpserver::{HttpContext, ResBuiler, Response, LocalDateTime};
+use httpserver::{HttpContext, ResBuiler, Response, LocalTime};
 use serde::{Serialize, Deserialize};
 
-use crate::aidb;
+use crate::{aidb, apis::authentication::Authentication, SESS_EXP_SECS};
 
-const ISSUER: &str = "accinfo";
-const EXP_SECS: i64 = 30 * 60;
+static PASSWORD: Mutex<String> = Mutex::new(String::new());
+static PASSWORD_ERR: &str = "can't lock mutex value 'PASSWORD'";
 
 pub async fn ping(ctx: HttpContext) -> Result<Response> {
     #[derive(Deserialize)] struct ReqParam { reply: Option<String> }
@@ -14,10 +16,17 @@ pub async fn ping(ctx: HttpContext) -> Result<Response> {
     struct ResData {
         reply: String,
         server: String,
-        now: LocalDateTime,
+        now: LocalTime,
     }
 
-    let now = LocalDateTime::now();
+    if log::log_enabled!(log::Level::Trace) {
+        for entry in ctx.req.headers() {
+            log::trace!("[header] {}: {}", entry.0.as_str(),
+                    std::str::from_utf8(entry.1.as_bytes()).unwrap());
+        }
+    }
+
+    let now = LocalTime::now();
     let server = format!("{}/{}", crate::APP_NAME, crate::APP_VER);
     let reply = match ctx.into_option_json::<ReqParam>().await? {
         Some(ping_params) => ping_params.reply,
@@ -35,29 +44,36 @@ pub async fn login(ctx: HttpContext) -> Result<Response> {
     }
 
     #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
     struct ResData {
         token: String,
-        expire: LocalDateTime,
+        expire: LocalTime,
+        refresh_time: LocalTime,
     }
 
     let req_param = ctx.into_json::<ReqParam>().await?;
-    httpserver::check_required!(req_param, user, pass);
-    let (user, pass) = (req_param.user.unwrap(), req_param.pass.unwrap());
+    let (user, pass) = httpserver::assign_required!(req_param, user, pass);
+
     let ac = crate::AppConf::get();
     let fpath = std::path::Path::new(&ac.database);
     let username = fpath.file_stem().unwrap();
 
-    if !fpath.exists() || username.to_str().unwrap() != &user {
-        return ResBuiler::fail("无效的用户名");
-    }
-    if !crate::aidb::check_password(&ac.database, &pass)? {
-        return ResBuiler::fail("无效的密码")
-    }
+    httpserver::fail_if!(!fpath.exists(), "数据库丢失");
+    httpserver::fail_if!(username.to_str().unwrap() != user, "用户名错误");
+    httpserver::fail_if!(!crate::aidb::check_password(&ac.database, pass)?, "密码错误");
 
-    let token = jwt::encode_with_rsa(&serde_json::json!({"user": user}), ISSUER, EXP_SECS as u64)?;
-    let expire = LocalDateTime::from(chrono::Local::now() + chrono::Duration::seconds(EXP_SECS));
+    // 保存用户密码
+    let mut p = PASSWORD.lock().expect(PASSWORD_ERR);
+    if pass != p.as_str() {
+        *p = String::from(pass);
+    }
+    drop(p);
 
-    ResBuiler::ok(&ResData { token, expire })
+    let token = Authentication::session_id()?;
+    let expire = LocalTime::from(chrono::Local::now() + chrono::Duration::seconds(SESS_EXP_SECS));
+    let refresh_time = LocalTime::from(chrono::Local::now() + chrono::Duration::seconds(SESS_EXP_SECS / 2));
+
+    ResBuiler::ok(&ResData { token, expire, refresh_time })
 }
 
 
@@ -73,21 +89,26 @@ pub async fn list(ctx: HttpContext) -> Result<Response> {
         records: aidb::Records,
     }
 
-    let req_param = ctx.into_json::<ReqParam>().await?;
+    let req_param = ctx.into_option_json::<ReqParam>().await?;
     let ac = crate::AppConf::get();
-    let recs = crate::aidb::load_database(&ac.database, &ac.password)?;
-    let mut ret = ResData { total: 0, records: Vec::with_capacity(recs.len()) };
+    let pass = PASSWORD.lock().expect(PASSWORD_ERR);
+    let recs = crate::aidb::load_database(&ac.database, pass.as_str())?;
+    let mut vec_record = Vec::with_capacity(recs.len());
+    // let mut ret = ResData { total: 0, records: Vec::with_capacity(recs.len()) };
+
+    let has_q = req_param.is_some() && req_param.as_ref().unwrap().q.is_some();
+    let q = httpserver::assign_if!(has_q, req_param.unwrap().q.unwrap(), String::with_capacity(0));
 
     for item in recs.iter() {
-        if let Some(q) = &req_param.q {
-            if item.title.contains(q) || item.url.contains(q) || item.notes.contains(q) {
-                ret.records.push(item.clone());
+        if has_q {
+            if item.title.contains(&q) || item.url.contains(&q) || item.notes.contains(&q) {
+                vec_record.push(item.clone());
             }
         } else {
-            ret.records.push(item.clone());
+            vec_record.push(item.clone());
         }
     }
-    ret.total = ret.records.len();
 
-    ResBuiler::ok(&ret)
+    let total = vec_record.len();
+    ResBuiler::ok(&ResData{records: Arc::from(vec_record), total})
 }

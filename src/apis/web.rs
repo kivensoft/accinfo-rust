@@ -24,10 +24,12 @@ fn map_content_type(file_type: &str) -> &'static str {
 
 pub async fn default_handler(ctx: HttpContext) -> Result<Response> {
     assert!(ctx.req.uri().path().len() > 0);
+    let ac = crate::AppConf::get();
     let mut path = &ctx.req.uri().path()[1..];
-    if path.len() == 0 {
+    if !ac.no_root && path.len() == 0 {
         path = &"index.html";
     }
+    let path = path;
 
     let f = match Asset::get(&path) {
         Some(f) => f,

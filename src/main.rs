@@ -4,10 +4,11 @@ mod aidb;
 use httpserver::HttpServer;
 use tokio::time;
 
-const APP_NAME: &str = "accinfo";    // 应用程序内部名称
-const APP_VER: &str = "1.2.0";      // 应用程序版本
+const APP_NAME: &str = "accinfo";   // 应用程序内部名称
+const APP_VER: &str = "1.2.2";      // 应用程序版本
 const SCHEDULED_SECS: u64 = 180;    // 定时任务执行时间间隔（单位：秒）
 const CACHE_EXPIRE_SECS: u64 = 600; // 数据缓存存活最大有效时间（单位：秒）
+const SESS_EXP_SECS: i64 = 30 * 60; // session过期时间（单位：秒）
 
 const BANNER: &str = r#"
                    _       ____
@@ -22,8 +23,9 @@ appconfig::appconfig_define!(AppConf,
     log_file : String => ["F",  "log-file",  "LogFile",        "log filename"],
     log_max  : String => ["M",  "log-max",   "LogFileMaxSize", "log file max size(unit: k/m/g)"],
     listen   : String => ["l",  "listen",    "Listen",         "http service ip:port"],
+    no_root  : bool   => ["",   "no-root",   "NoRoot",         "disabled auto redirect / to /index.html"],
     database : String => ["d",  "database",  "Database",       "set aidb database filename"],
-    password : String => ["p",  "password",  "Password",       "set database password"],
+    password : String => ["p",  "password",  "Password",       "encrypt database with password"],
     encrypt  : String => ["",   "encrypt",   "Encrypt",        "encrypt KeePass xml file to aidb database format"],
 );
 
@@ -34,6 +36,7 @@ impl Default for AppConf {
             log_file : String::new(),
             log_max  : String::from("10m"),
             listen   : String::from("0.0.0.0:8080"),
+            no_root  : false,
             database : String::new(),
             password : String::new(),
             encrypt  : String::new(),
@@ -51,10 +54,6 @@ fn init() -> Option<()> {
         eprintln!("must use --database set aidb database filename");
         return None;
     }
-    if ac.password.is_empty() {
-        eprintln!("must use --password set database password");
-        return None;
-    }
 
     let log_level = asynclog::parse_level(&ac.log_level).unwrap();
     let log_max = asynclog::parse_size(&ac.log_max).unwrap();
@@ -68,11 +67,15 @@ fn init() -> Option<()> {
         .log_file(ac.log_file.clone())
         .log_file_max(log_max)
         .use_console(true)
-        .use_async(true)
+        .use_async(false)
         .builder()
         .expect("init log failed");
 
     if !ac.encrypt.is_empty() {
+        if ac.password.is_empty() {
+            eprintln!("must use --password set database password");
+            return None;
+        }
         aidb::encrypt_database(&ac.encrypt, &ac.password, &ac.database).unwrap();
         println!("{} -> {} conversion completed.", ac.encrypt, ac.database);
         return None;
@@ -97,6 +100,7 @@ async fn main() {
     let mut srv = HttpServer::new(true);
 
     srv.default_handler(apis::default_handler);
+    srv.middleware(apis::Authentication);
 
     httpserver::register_apis!(srv, "/api",
         "/ping": apis::ping,
@@ -110,6 +114,7 @@ async fn main() {
         loop {
             interval.tick().await;
             aidb::recycle_cache(std::time::Duration::from_secs(CACHE_EXPIRE_SECS));
+            apis::Authentication::recycle();
         }
     });
 

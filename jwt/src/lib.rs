@@ -11,6 +11,9 @@ use anyhow::Result;
 
 type HmacSha256 = Hmac<Sha256>;
 
+pub const AUTHORIZATION: &str = "Authorization";
+pub const BEARER: &str = "Bearer ";
+
 // json字符串的base64编码: {"alg":"HS256","typ":"JWT"}
 const HEADER_B64: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
 const ISSUER_KEY: &str = "iss";
@@ -27,7 +30,7 @@ pub fn get_sign(jwt: &str) -> Option<&str> {
     }
 }
 
-/// Generate a jwt using the specified parameters
+/// Generate a jwt using the specified parameters, jwt type is HS256
 ///
 /// * `claims`: jwt user custom data, it must be Value::Object or Value::Null
 /// * `key`: jwt hmac encrypt key
@@ -41,6 +44,8 @@ pub fn get_sign(jwt: &str) -> Option<&str> {
 /// # Examples
 ///
 /// ```rust
+/// use jwt;
+///
 /// let s = jwt::encode(&serde_json::json!({
 ///     "userId": 1,
 ///     "username": "kiven",
@@ -76,6 +81,26 @@ pub fn encode(claims: &Value, key: &str, issuer: &str, exp: u64) -> Result<Strin
     Ok(jwt_data)
 }
 
+/// Generate a jwt using the specified parameters, jwt type is RS256
+///
+/// * `claims`: jwt user custom data, it must be Value::Object or Value::Null
+/// * `issuer` jwt issuer value
+/// * `exp`: jwt expire time value(Unit: second), 1 hour like 3600
+///
+/// Returns:
+///
+/// Ok(String): jwt string, Err(e): error
+///
+/// # Examples
+///
+/// ```rust
+/// use jwt;
+///
+/// let s = jwt::encode_with_rsa(&serde_json::json!({
+///     "userId": 1,
+///     "username": "kiven",
+/// }), "password", "my_app_name", 86400).unwrap();
+/// ```
 pub fn encode_with_rsa(claims: &Value, issuer: &str, exp: u64) -> Result<String> {
     // 复制claims，并添加 issuer 和 exp 属性，形成最终的 claims 条目
     debug_assert!(claims.is_null() || claims.is_object());
@@ -110,7 +135,7 @@ pub fn encode_with_rsa(claims: &Value, issuer: &str, exp: u64) -> Result<String>
     Ok(jwt_data)
 }
 
-/// Parsing and verifying jwt string
+/// Parsing and verifying jwt string, using jwt type HS256
 ///
 /// * `jwt`: jwt string
 /// * `key`: jwt hmac encrypt key
@@ -123,11 +148,13 @@ pub fn encode_with_rsa(claims: &Value, issuer: &str, exp: u64) -> Result<String>
 /// # Examples
 ///
 /// ```rust
-/// let jwt_str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\
-///     .eyJleHAiOjE2ODAzNjc0ODUsImlzc3VlciI6ImFjY2luZm8\
-///         iLCJ1c2VySWQiOjEsInVzZXJuYW1lIjoia2l2ZW4ifQ\
-///     .2kD_fLk6u8ngl69-FDYj7Bc0UozwBEAWUHXngJ2qw9U";
-/// let s = jwt::decode(&jwt_str, "password", "my_app_name").unwrap();
+/// let jwt_str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOi\
+///     JhY2NpbmZvIiwidXNlciI6ImtpdmVuIiwiZXhwIjoxNTE2MjM5MDIyfQ.t\
+///     dcZYbN7tavs9LdbfZT7R1SJeu75FVHvtljm8gjNGig";
+///
+/// let s = jwt::decode(&jwt_str, "password", "accinfo").unwrap();
+///
+/// assert_eq!("kiven", s["user"].as_str());
 /// ```
 pub fn decode(jwt: &str, key: &str, issuer: &str) -> Result<Value> {
     // 把jwt按‘.'分为3段
@@ -163,6 +190,32 @@ pub fn decode(jwt: &str, key: &str, issuer: &str) -> Result<Value> {
     Ok(claims)
 }
 
+/// Parsing and verifying jwt string, using jwt type RS256
+///
+/// * `jwt`: jwt string
+/// * `issuer` jwt issuer value
+///
+/// Returns:
+///
+/// Ok(String): jwt string, Err(e): error
+///
+/// # Examples
+///
+/// ```rust
+/// use jwt;
+///
+/// let jwt_str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJhY2NpbmZv\
+///     IiwidXNlciI6ImtpdmVuIiwiZXhwIjoxNTE2MjM5MDIyfQ.pbpeMJL4ZPZ-vmf3jgtWKT\
+///     gvg7erJrjsFhKTd92NvIqe6nO1SESf92YZLF6G-Dj0k8wfitEvuEQH190xSdGuHMMM-QH\
+///     _wWIGJCSG6G6QFjB3c5ZxePEqdY118LNp0AhA9odJiy9cZ6tFDJiyWX1aq9rBnYFnEErc\
+///     w_m\ZyLC-PC7k9g6IgT7BaTe7_FOkI8y74RA8SMmFELAfwULB1bZaDZ0SLfMzvv8lwAY6\
+///     UiPvQso-eGVTPnc1YuIO154Fg9Se2eh_hU6Ktwwl6VBWpikE-TxExfUsD8dmNtL5b3QNe\
+///     1Hf17UfeYG5PmNbQsg1ybDlLqyP68Q1Vvfr_54Bu8szfw";
+///
+/// let s = jwt::decode(&jwt_str, "accinfo").unwrap();
+///
+/// assert_eq!("kiven", s["user"].as_str());
+/// ```
 pub fn decode_with_rsa(jwt: &str, issuer: &str) -> Result<Value> {
     // 把jwt按‘.'分为3段
     let (header_claims_b64, sign_b64) = match jwt.rfind('.') {

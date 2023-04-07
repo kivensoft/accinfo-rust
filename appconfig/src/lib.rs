@@ -78,7 +78,7 @@ macro_rules! appconfig_define {
     };
     (@get_opt_value $matches:expr, $name:expr, $out_val:expr, $t:ty) => {
         if let Some(s) = $matches.opt_str($name) {
-            $out_val = s.parse::<$t>().with_context(
+            $out_val = anyhow::Context::with_context(s.parse::<$t>(),
                 || format!("program argument {} is not a numbe", $name))?;
         }
     };
@@ -161,7 +161,6 @@ macro_rules! appconfig_define {
 const C_HELP: &str = "help";
 #[cfg(feature="cfg-file")]
 const C_CONF_FILE: &str = "conf-file";
-const C_VERSION: &str = "version";
 
 pub trait AppConfig {
     fn to_opts(&self) -> getopts::Options;
@@ -236,25 +235,17 @@ pub fn parse_args_ext<T: AppConfig, F: Fn(&T) -> bool>(app_config: &mut T, versi
     opts.optflag("h", C_HELP, "this help");
     #[cfg(feature="cfg-file")]
     opts.optopt("c",  C_CONF_FILE, "set configuration file", "ConfigFile");
-    if version.len() > 0 {
-        opts.optflag("",  C_VERSION, "show version and exit");
-    }
 
     let matches = match anyhow::Context::context(opts.parse(args), "parse program arguments failed") {
         Ok(m) => m,
         Err(e) => {
-            print_usage(&prog, &opts);
+            print_usage(&prog, version, &opts);
             return Err(e);
         },
     };
 
     if matches.opt_present(C_HELP) {
-        print_usage(&prog, &opts);
-        return Ok(false);
-    }
-
-    if version.len() > 0 && matches.opt_present(C_VERSION) {
-        println!("{version}");
+        print_usage(&prog, version, &opts);
         return Ok(false);
     }
 
@@ -268,7 +259,7 @@ pub fn parse_args_ext<T: AppConfig, F: Fn(&T) -> bool>(app_config: &mut T, versi
     app_config.set_from_getopts(&matches)?;
 
     if !f(app_config) {
-        print_usage(&prog, &opts);
+        print_usage(&prog, version, &opts);
         return Ok(false);
     }
 
@@ -277,7 +268,10 @@ pub fn parse_args_ext<T: AppConfig, F: Fn(&T) -> bool>(app_config: &mut T, versi
     Ok(true)
 }
 
-fn print_usage(prog: &str, opts: &getopts::Options) {
+fn print_usage(prog: &str, version: &str, opts: &getopts::Options) {
+    if version.len() > 0 {
+        println!("\n{}", version);
+    }
     let path = std::path::Path::new(prog);
     let prog = path.file_name().unwrap().to_str().unwrap();
     let brief = format!("\nUsage: \x1b[36m{} \x1b[33m{}\x1b[0m", &prog, "[options]");

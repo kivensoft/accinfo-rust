@@ -8,15 +8,26 @@ type Aes128Ctr64LE = ctr::Ctr64LE<aes::Aes128>;
 
 const IV: &str = "The great rejuvenation of the Chinese nation";
 
-lazy_static::lazy_static! {
-    static ref G_RECS: Mutex<Option<CacheRecord>> = Mutex::new(None);
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Record {
+    pub id: String,
+    pub title: String,
+    pub user: String,
+    pub pass: String,
+    pub url: String,
+    pub notes: String,
 }
 
-pub type Records = Vec<Arc<Record>>;
+pub type Records = Arc<[Arc<Record>]>;
 
 pub struct CacheRecord {
-    pub data: Arc<Records>,
+    pub data: Records,
     time: std::time::Instant,
+}
+
+lazy_static::lazy_static! {
+    static ref G_RECS: Mutex<Option<CacheRecord>> = Mutex::new(None);
 }
 
 pub fn recycle_cache(expire: std::time::Duration) {
@@ -45,17 +56,6 @@ impl MyAes {
     pub fn encrypt(&mut self, data: &mut [u8]) {
         self.0.apply_keystream(data);
     }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct Record {
-    pub id: String,
-    pub title: String,
-    pub user: String,
-    pub pass: String,
-    pub url: String,
-    pub notes: String,
 }
 
 fn load_xml(xml: &[u8]) -> anyhow::Result<Vec<Record>> {
@@ -192,7 +192,7 @@ pub fn encrypt_database(xml_file: &str, password: &str, out_file: &str) -> anyho
 ///
 /// * `aidb`: Database file name
 /// * `password`: Database password
-pub fn load_database(aidb: &str, password: &str) -> anyhow::Result<Arc<Records>> {
+pub fn load_database(aidb: &str, password: &str) -> anyhow::Result<Records> {
     let mut g_recs = G_RECS.lock().unwrap();
     if let Some(ref mut recs) = *g_recs {
         recs.time = std::time::Instant::now();
@@ -216,8 +216,9 @@ pub fn load_database(aidb: &str, password: &str) -> anyhow::Result<Arc<Records>>
 
     aes_decrypt(password.as_bytes(), &mut buf[ATTACH_LEN..]);
 
+    let data: Vec<Arc<Record>> = serde_json::from_slice(&buf[ATTACH_LEN..])?;
     let recs: CacheRecord = CacheRecord {
-        data: Arc::new(serde_json::from_slice(&buf[ATTACH_LEN..])?),
+        data: Arc::from(data),
         time: std::time::Instant::now(),
     };
 

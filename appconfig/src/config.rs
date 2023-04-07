@@ -53,31 +53,32 @@ struct ConfigItem {
 impl ConfigItem {
     fn new() -> Self { Self {key_begin: 0, key_end: 0, val_begin: 0, val_end: 0} }
 }
-enum ParseStatus { KeyBegin, Comment, Key, Equal, ValBegin, Val, ValContinue }
 
 /// Config Struct
 pub struct Config {
     data: Vec<u8>,
-    kv: Vec<ConfigItem>,
+    key_values: Vec<ConfigItem>,
 }
 
 /// Config Implementation
 impl Config {
     pub fn with_file<T: AsRef<Path>>(file: T) -> anyhow::Result<Self> {
         let data = fs::read(file)?;
+        std::str::from_utf8(&data)?;
         let kv = Self::parse(&data)?;
-        Ok(Self {data, kv})
+        Ok(Self {data, key_values: kv})
     }
 
     pub fn with_text(text: String) -> anyhow::Result<Self> {
         let data = text.into_bytes();
         let kv = Self::parse(&data)?;
-        Ok(Self {data, kv})
+        Ok(Self {data, key_values: kv})
     }
 
     pub fn with_data(data: Vec<u8>) -> anyhow::Result<Self> {
         let kv = Self::parse(&data)?;
-        Ok(Self {data, kv})
+        std::str::from_utf8(&data)?;
+        Ok(Self {data, key_values: kv})
     }
 
     /// Get a value from config as ayn type (That Impls str::FromStr)
@@ -105,7 +106,7 @@ impl Config {
     /// Get a value as original data (not escape)
     pub fn get_raw<'a>(&'a self, key: &str) -> Option<&'a [u8]> {
         let key = key.as_bytes();
-        for kv in self.kv.iter() {
+        for kv in self.key_values.iter() {
             if key == &self.data[kv.key_begin..kv.key_end] {
                 return Some(&self.data[kv.val_begin .. kv.val_end]);
             }
@@ -143,9 +144,11 @@ impl Config {
                 }
                 i += 1;
             }
-            Ok(Cow::Owned(String::from_utf8(v)?))
+            // parse之前已经做过utf8有效性检测了，因此这里无需再做1次
+            Ok(Cow::Owned(unsafe {String::from_utf8_unchecked(v)}))
         } else {
-            Ok(Cow::Borrowed(std::str::from_utf8(val)?))
+            // parse之前已经做过utf8有效性检测了，因此这里无需再做1次
+            Ok(Cow::Borrowed(unsafe {std::str::from_utf8_unchecked(val)}))
         }
     }
 
@@ -177,6 +180,7 @@ impl Config {
 
     /// Parse a string into the config
     fn parse(data: &[u8]) -> anyhow::Result<Vec<ConfigItem>> {
+        enum ParseStatus { KeyBegin, Comment, Key, Equal, ValBegin, Val, ValContinue }
 
         let mut result = Vec::with_capacity(64);
         let mut pstate = ParseStatus::KeyBegin;
@@ -310,13 +314,15 @@ impl Config {
                     // }
                 },
                 ParseStatus::ValContinue => {
-
-                    match c {
-                        b' ' | b'\t' => {},
-                        _ => {
-                            pstate = ParseStatus::Val;
-                        }
-                    }
+                    skip_chars!(data, i, imax, b' ', b'\t');
+                    pstate = ParseStatus::Val;
+                    continue;
+                    // match c {
+                    //     b' ' | b'\t' => {},
+                    //     _ => {
+                    //         pstate = ParseStatus::Val;
+                    //     }
+                    // }
                 },
             }
             i += 1;
@@ -340,7 +346,7 @@ impl Config {
 
 impl Default for Config {
     fn default() -> Config {
-        Config {data: Vec::with_capacity(0), kv: Vec::with_capacity(0)}
+        Config {data: Vec::with_capacity(0), key_values: Vec::with_capacity(0)}
     }
 }
 
@@ -350,7 +356,8 @@ mod tests {
 
     #[test]
     fn test_config() {
-        let cf = Config::with_text(r#"a = b\\c\s
+        let cf = Config::with_text(r#"  a = \
+        b\\c\s\
 
         user_name = 中文 \
         输入 #comment

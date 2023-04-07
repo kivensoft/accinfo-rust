@@ -34,7 +34,7 @@ macro_rules! ac_red {
 
 /// ## Example:
 /// ```rust
-/// println!("this color is {}.", ansicolor::ac_green!("red"));
+/// println!("this color is {}.", ansicolor::ac_green!("green"));
 /// println!("this color is {}.", ansicolor::ac_green!(72));
 /// println!("this color is {}.", ansicolor::ac_green!("my name is {}, age is {}", "kiven", 18));
 /// ```
@@ -45,7 +45,7 @@ macro_rules! ac_green {
 
 /// ## Example:
 /// ```rust
-/// println!("this color is {}.", ansicolor::ac_yellow!("red"));
+/// println!("this color is {}.", ansicolor::ac_yellow!("yellow"));
 /// println!("this color is {}.", ansicolor::ac_yellow!(72));
 /// println!("this color is {}.", ansicolor::ac_yellow!("my name is {}, age is {}", "kiven", 18));
 /// ```
@@ -56,7 +56,7 @@ macro_rules! ac_yellow {
 
 /// ## Example:
 /// ```rust
-/// println!("this color is {}.", ansicolor::ac_blue!("red"));
+/// println!("this color is {}.", ansicolor::ac_blue!("blue"));
 /// println!("this color is {}.", ansicolor::ac_blue!(72));
 /// println!("this color is {}.", ansicolor::ac_blue!("my name is {}, age is {}", "kiven", 18));
 /// ```
@@ -67,7 +67,7 @@ macro_rules! ac_blue {
 
 /// ## Example:
 /// ```rust
-/// println!("this color is {}.", ansicolor::ac_magenta!("red"));
+/// println!("this color is {}.", ansicolor::ac_magenta!("magenta"));
 /// println!("this color is {}.", ansicolor::ac_magenta!(72));
 /// println!("this color is {}.", ansicolor::ac_magenta!("my name is {}, age is {}", "kiven", 18));
 /// ```
@@ -78,7 +78,7 @@ macro_rules! ac_magenta {
 
 /// ## Example:
 /// ```rust
-/// println!("this color is {}.", ansicolor::ac_cyan!("red"));
+/// println!("this color is {}.", ansicolor::ac_cyan!("cyan"));
 /// println!("this color is {}.", ansicolor::ac_cyan!(72));
 /// println!("this color is {}.", ansicolor::ac_cyan!("my name is {}, age is {}", "kiven", 18));
 /// ```
@@ -89,7 +89,7 @@ macro_rules! ac_cyan {
 
 /// ## Example:
 /// ```rust
-/// println!("this color is {}.", ansicolor::ac_white!("red"));
+/// println!("this color is {}.", ansicolor::ac_white!("white"));
 /// println!("this color is {}.", ansicolor::ac_white!(72));
 /// println!("this color is {}.", ansicolor::ac_white!("my name is {}, age is {}", "kiven", 18));
 /// ```
