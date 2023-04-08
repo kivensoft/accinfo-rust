@@ -1,5 +1,6 @@
-use std::{io::{Write, BufWriter, LineWriter}};
+use std::io::{Write, BufWriter, LineWriter};
 use std::sync::mpsc::Sender;
+use chrono::Local;
 use parking_lot::Mutex;
 use std::str::FromStr;
 
@@ -233,7 +234,7 @@ impl AsyncLogger {
 
         // 如果启用了控制台输出，则写入控制台
         if let Some(ref mut console) = logger_data.console {
-            console.write_all(msg).expect("output log console error");
+            console.write_all(msg).expect("log to console fail");
         }
 
         let mut curr_size = logger_data.log_size;
@@ -254,15 +255,13 @@ impl AsyncLogger {
                 // 删除已有备份，并重命名现有文件为备份文件
                 let bak = format!("{}.bak", self.log_file);
                 std::fs::remove_file(&bak).unwrap_or_default();
-
-                std::fs::rename(&self.log_file, &bak)
-                        .expect("rename log file to backup error");
+                std::fs::rename(&self.log_file, &bak).expect("backup log file fail");
 
                 let f = std::fs::OpenOptions::new()
                         .write(true)
                         .create(true)
                         .open(&self.log_file)
-                        .expect("reopen log file error");
+                        .expect("reopen log file fail");
 
                 logger_data.fileout = Some(LogWriter::new(f));
                 curr_size = 0;
@@ -270,7 +269,7 @@ impl AsyncLogger {
         }
 
         if let Some(ref mut fileout) = logger_data.fileout {
-            fileout.write_all(msg).expect("write log file error");
+            fileout.write_all(msg).expect("write log file fail");
             logger_data.log_size = curr_size + msg.len() as u32;
         }
     }
@@ -295,17 +294,21 @@ impl log::Log for AsyncLogger {
     fn log(&self, record: &log::Record) {
         if record.metadata().level() > self.level { return; }
 
-        let now = chrono::Local::now().format("%m-%d %H:%M:%S");
+        let dt_fmt = if self.level >= log::LevelFilter::Debug {
+            "%m-%d %H:%M:%S"
+        } else {
+            "%Y-%m-%d %H:%M:%S"
+        };
+        let now = Local::now().format(dt_fmt);
 
         // 日志条目格式化
         let msg = if self.level >= log::LevelFilter::Debug {
-            format!("[\x1b[36m{}\x1b[0m] [{}{:5}\x1b[0m] [{}::{}] - {}\n",
-                    now,
+            format!("[\x1b[36m{now}\x1b[0m] [{}{:5}\x1b[0m] [{}::{}] - {}\n",
                     level_color(record.level()), record.level(),
                     record.target(), record.line().unwrap_or(0),
                     record.args())
         } else {
-            format!("[{}] [{:5}] - {}\n", now, record.level(), record.args())
+            format!("[{now}] [{:5}] - {}\n", record.level(), record.args())
         };
 
         let logger_data = self.logger_data.lock();

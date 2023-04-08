@@ -95,8 +95,6 @@ fn init() -> Option<()> {
 async fn main() {
     if let None = init() { return; }
 
-    let ac = AppConf::get();
-    let addr: std::net::SocketAddr = ac.listen.parse().unwrap();
     let mut srv = HttpServer::new(true);
 
     srv.default_handler(apis::default_handler);
@@ -118,6 +116,7 @@ async fn main() {
         }
     });
 
+    let addr: std::net::SocketAddr = AppConf::get().listen.parse().unwrap();
     srv.run(addr).await.unwrap();
 
 }
