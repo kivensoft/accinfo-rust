@@ -8,3 +8,4 @@ description = "A simple, asynchronous log library"
 [dependencies]
 log = "0.4"
 chrono ="0.4"
+parking_lot = "0.12"

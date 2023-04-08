@@ -1,30 +1,38 @@
 # accinfo
 账户信息管理系统
-account infomation manager system
 
 ---
+#### 介绍
+**keepass**是一款非常好用的账户信息管理工具，可是keepass是本地gui应用，安全性是有保障了，但无法通过远程或者手机进行访问，本工具正是为了解决该问题而产生的。
+
+使用本工具，可对keepass导出的xml数据进行加密转换保存，对外提供http访问接口。aidb的数据做了加密保存，因此用户可以放心的将服务托管到云平台而不必担心数据泄漏，配合nginx做https反向代理，实现端到端的加密，可以安全、方便的为用户提供数据查询功能。
+
 #### 项目地址
-<https://gitee.com/kivensoft/accinfo_rust>
+<https://github.com/kivensoft/accinfo_rust>
 
 ###### 技术框架
-- rust 1.65+ 媲美C语言的强类型开发语言
-- tokio 1.26+ 目前最流行也是性能最好的异步io运行时
-- hyper 0.14+ http底层协议库，是众多三方web框架使用的基础库
-- serde_json 1.0+ 最流行也是速度最快的json序列化库
-- anyhow 1.0+ 最流行的错误处理库，增强标准库的错误处理
-- log 0.4+ 日志门面库，rust标准库
-- chrono 0.4+ 最流行的日期时间处理库
-- async-trait 0.1+ 支持异步函数的trait扩展库
-- lazy_static 1.4+ 最流行的静态变量初始化扩展库
-- asynclog 简单的异步日志库，采用独立线程进行日志输出
-- ansicolor 终端支持的ansi颜色扩展库
-- appconfig 命令行参数及配置文件参数解析库
-- httpserver 迷你的http server库
 
----
+|名称|类型|选择理由|
+|----|----|--------|
+|rust|开发语言|安全、高性能、跨平台|
+|tokio|异步io运行时|最流行、高性能|
+|hyper|http协议|最流行、高性能|
+|serde_json|json序列化|最流行、高性能|
+|log|日志门面|最流行、官方推荐|
+|chrono|日期时间处理|最流行|
+|aes|数据库加密算法|高安全性|
+|md5|口令加密算法|高安全性|
+|asynclog|异步日志|简单、高性能|
+|httpserver|http服务框架|简单、高性能|
+
 ###### 源代码下载
 `git clone git@github.com:kivensoft/accinfo_rust.git`
 ###### 编译
 `cargo build`
 ###### 运行
-`accinfo`
+1. 导出keepass的数据库，导出类型为xml（假设导出文件名为simple.xml）
+2. 转换xml为aidb并进行加密保存
+   `accinfo -d simple.aidb -p 12345678 --encrypt simple.xml`
+3. 启动应用
+   `accinfo -L debug -d simple.aidb`
+4. 打开浏览器，访问 `http://localhost:8080/`

@@ -1,8 +1,9 @@
-use std::{io::{Write, Read}, sync::{Arc, Mutex}};
+use std::{io::{Write, Read}, sync::Arc};
 use serde::{Serialize, Deserialize};
 use quick_xml::{events::Event, reader::Reader};
 use md5::{Md5, Digest, Md5Core, digest::Output};
 use aes::cipher::{KeyIvInit, StreamCipher};
+use parking_lot::Mutex;
 
 type Aes128Ctr64LE = ctr::Ctr64LE<aes::Aes128>;
 
@@ -31,7 +32,7 @@ lazy_static::lazy_static! {
 }
 
 pub fn recycle_cache(expire: std::time::Duration) {
-    let mut g_recs = G_RECS.lock().unwrap();
+    let mut g_recs = G_RECS.lock();
     if let Some(recs) = g_recs.as_ref() {
         if recs.time.elapsed() > expire {
             g_recs.take();
@@ -193,7 +194,7 @@ pub fn encrypt_database(xml_file: &str, password: &str, out_file: &str) -> anyho
 /// * `aidb`: Database file name
 /// * `password`: Database password
 pub fn load_database(aidb: &str, password: &str) -> anyhow::Result<Records> {
-    let mut g_recs = G_RECS.lock().unwrap();
+    let mut g_recs = G_RECS.lock();
     if let Some(ref mut recs) = *g_recs {
         recs.time = std::time::Instant::now();
         return Ok(recs.data.clone());

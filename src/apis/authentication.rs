@@ -1,5 +1,5 @@
 use std::{time::SystemTime, net::Ipv4Addr, collections::HashMap};
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use httpserver::{HttpContext, ResBuiler, Response, Next};
 
@@ -27,24 +27,22 @@ pub struct Authentication;
 
 impl Authentication {
     pub fn recycle() {
-        if let Ok(mut sessions) = SESSIONS.lock() {
-            let now = Self::now();
-            let len = sessions.len();
-            sessions.retain(|v| v.exp > now);
-            if len > sessions.len() {
-                log::trace!("recycle {} session", len - sessions.len());
-            }
+        let mut sessions = SESSIONS.lock();
+        let now = Self::now();
+        let len = sessions.len();
+        sessions.retain(|v| v.exp > now);
+        if len > sessions.len() {
+            log::trace!("recycle {} session", len - sessions.len());
         }
     }
 
     fn check_session(id: u64) -> bool {
-        if let Ok(mut sessions) = SESSIONS.lock() {
-            let now = Self::now();
-            for item in sessions.as_mut_slice() {
-                if item.id == id && item.exp > now {
-                    item.exp = now + crate::SESS_EXP_SECS as u64;
-                    return true;
-                }
+        let mut sessions = SESSIONS.lock();
+        let now = Self::now();
+        for item in sessions.as_mut_slice() {
+            if item.id == id && item.exp > now {
+                item.exp = now + crate::SESS_EXP_SECS as u64;
+                return true;
             }
         }
         return false;
@@ -60,28 +58,27 @@ impl Authentication {
     }
 
     pub fn session_id() -> anyhow::Result<String> {
-        if let Ok(mut sessions) = SESSIONS.lock() {
-            let mut id = rand::random::<u64>();
-            let mut count = 0;
-            loop {
-                for item in &*sessions {
-                    if item.id == id {
-                        #[allow(unreachable_code)]
-                        if count > 10000 {
-                            return anyhow::bail!("generator random session id has reached the maximum number of attempts");
-                        }
-                        count += 1;
-                        id = rand::random();
-                        continue;
+        let mut sessions = SESSIONS.lock();
+        let mut id = rand::random::<u64>();
+        let mut count = 0;
+        loop {
+            for item in &*sessions {
+                if item.id == id {
+                    #[allow(unreachable_code)]
+                    if count > 10000 {
+                        return anyhow::bail!("generator random session id has reached the maximum number of attempts");
                     }
+                    count += 1;
+                    id = rand::random();
+                    continue;
                 }
-                break;
             }
-            let exp = Self::now() + crate::SESS_EXP_SECS as u64;
-            sessions.push(SessionItem {id, exp});
-            return Ok(format!("{:016x}", id));
+            break;
         }
-        anyhow::bail!("Unable access sessions");
+        let exp = Self::now() + crate::SESS_EXP_SECS as u64;
+        sessions.push(SessionItem {id, exp});
+
+        Ok(format!("{:016x}", id))
     }
 
     fn check_limit(ip: Ipv4Addr) -> bool {
@@ -91,7 +88,7 @@ impl Authentication {
             .as_secs();
         let statis_time = unsafe { STATIS_TIME };
 
-        let mut limits = CURRENT_LIMITINGS.lock().expect("can't lock CURRENT_LIMITINGS");
+        let mut limits = CURRENT_LIMITINGS.lock();
 
         // 每隔1秒钟，重新计算限流值
         if now > statis_time {

@@ -1,13 +1,12 @@
-use std::sync::{Mutex, Arc};
-
+use std::{sync::Arc, path::Path};
 use anyhow::Result;
+use chrono::{Local, Duration};
 use httpserver::{HttpContext, ResBuiler, Response, LocalTime};
 use serde::{Serialize, Deserialize};
-
+use parking_lot::Mutex;
 use crate::{aidb, apis::authentication::Authentication, SESS_EXP_SECS};
 
 static PASSWORD: Mutex<String> = Mutex::new(String::new());
-static PASSWORD_ERR: &str = "can't lock mutex value 'PASSWORD'";
 
 pub async fn ping(ctx: HttpContext) -> Result<Response> {
     #[derive(Deserialize)] struct ReqParam { reply: Option<String> }
@@ -55,7 +54,7 @@ pub async fn login(ctx: HttpContext) -> Result<Response> {
     let (user, pass) = httpserver::assign_required!(req_param, user, pass);
 
     let ac = crate::AppConf::get();
-    let fpath = std::path::Path::new(&ac.database);
+    let fpath = Path::new(&ac.database);
     let username = fpath.file_stem().unwrap();
 
     httpserver::fail_if!(!fpath.exists(), "数据库丢失");
@@ -63,15 +62,15 @@ pub async fn login(ctx: HttpContext) -> Result<Response> {
     httpserver::fail_if!(!crate::aidb::check_password(&ac.database, pass)?, "密码错误");
 
     // 保存用户密码
-    let mut p = PASSWORD.lock().expect(PASSWORD_ERR);
+    let mut p = PASSWORD.lock();
     if pass != p.as_str() {
         *p = String::from(pass);
     }
     drop(p);
 
     let token = Authentication::session_id()?;
-    let expire = LocalTime::from(chrono::Local::now() + chrono::Duration::seconds(SESS_EXP_SECS));
-    let refresh_time = LocalTime::from(chrono::Local::now() + chrono::Duration::seconds(SESS_EXP_SECS / 2));
+    let expire = LocalTime::from(Local::now() + Duration::seconds(SESS_EXP_SECS));
+    let refresh_time = LocalTime::from(Local::now() + Duration::seconds(SESS_EXP_SECS / 2));
 
     ResBuiler::ok(&ResData { token, expire, refresh_time })
 }
@@ -91,7 +90,7 @@ pub async fn list(ctx: HttpContext) -> Result<Response> {
 
     let req_param = ctx.into_option_json::<ReqParam>().await?;
     let ac = crate::AppConf::get();
-    let pass = PASSWORD.lock().expect(PASSWORD_ERR);
+    let pass = PASSWORD.lock();
     let recs = crate::aidb::load_database(&ac.database, pass.as_str())?;
     let mut vec_record = Vec::with_capacity(recs.len());
     // let mut ret = ResData { total: 0, records: Vec::with_capacity(recs.len()) };

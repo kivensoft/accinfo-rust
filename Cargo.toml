@@ -18,23 +18,24 @@ panic = 'abort'
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "1.26", features = ["full"] }
-hyper = { version = "0.14", features = ["http1", "client"] }
-serde = { version = "1.0", features = ["derive", "rc"] }
-serde_json = "1.0"
-anyhow = "1.0"
-log = "0.4"
-chrono = { version = "0.4", features = ["serde"] }
-lazy_static = "1.4"
-md-5 = "0.10"
-aes = "0.8"
-ctr = "0.9"
-quick-xml = "0.28"
-async-trait = "0.1"
-rand = "0.8"
-rust-embed = { version = "6.6", features = ["include-exclude"] }
-asynclog = { version = "1.0", path = "asynclog" }
-appconfig = { version = "1.0", path = "appconfig" }
-ansicolor = { version = "1.0", path = "ansicolor" }
-httpserver = { version = "1.0", path = "httpserver" }
-jwt = { version = "1.0", path = "jwt" }
+tokio = { version = "1.26.0", features = ["full"] } # 最流行的异步io库
+hyper = { version = "0.14.25", features = ["http1", "client"] } # 最流行的底层http协议库
+serde = { version = "1.0.159", features = ["derive", "rc"] } # 最流行的序列化反序列化库
+serde_json = "1.0.95" # 最流行的json序列化反序列化库
+anyhow = "1.0.70" # 最流行的错误处理库
+log = "0.4.17" # 日志门面库，官方标准
+chrono = { version = "0.4.24", features = ["serde"] } # 最流行的日期时间库
+lazy_static = "1.4.0" # 最流行的静态变量声明库
+parking_lot = "0.12.1" # 性能更好的替代标准库Mutex/RwLock的三方库
+md-5 = "0.10.5" # 基于rust-crypto的md5算法库
+aes = "0.8.2" # 基于rust-crypto的aes基础算法库
+ctr = "0.9.2" # aes的各种算法实现，基于aes库
+quick-xml = "0.28.1" # 流式xml解析库
+async-trait = "0.1.68" # trait的异步函数声明库
+rand = "0.8.5" # 最流行的随机函数库
+rust-embed = { version = "6.6.1", features = ["include-exclude"] } # 将资源文件内嵌进可执行文件中的库
+asynclog = { version = "1.0", path = "asynclog" } # 支持同步和异步两种方式的迷你日志实现库
+appconfig = { version = "1.0", path = "appconfig" } # 支持命令行参数解析和配置文件参数解析的库
+ansicolor = { version = "1.0", path = "ansicolor" } # 支持终端ansi颜色的库
+httpserver = { version = "1.0", path = "httpserver" } # 基于hyper实现的迷你的http服务库
+jwt = { version = "1.0", path = "jwt" } # jwt实现库，支持HS256和RS256两种方式

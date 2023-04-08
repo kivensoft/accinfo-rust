@@ -1,5 +1,6 @@
 use std::{io::{Write, BufWriter, LineWriter}};
-use std::sync::{mpsc::Sender, Mutex};
+use std::sync::mpsc::Sender;
+use parking_lot::Mutex;
 use std::str::FromStr;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -122,7 +123,7 @@ pub fn init_log(level: log::LevelFilter, log_file: String, log_file_max: u32, us
 
     let logger = Box::leak(logger);
     let plog = logger as *mut AsyncLogger;
-    let mut logger_data = logger.logger_data.lock().expect("init_log call mutex lock error");
+    let mut logger_data = logger.logger_data.lock();
 
     // 如果启用控制台输出，创建一个控制台共享句柄
     if use_console {
@@ -228,7 +229,7 @@ struct AsyncLogger {
 impl AsyncLogger {
     // 输出日志到控制台和文件
     fn write(&self, msg: &[u8]) {
-        let mut logger_data = self.logger_data.lock().unwrap();
+        let mut logger_data = self.logger_data.lock();
 
         // 如果启用了控制台输出，则写入控制台
         if let Some(ref mut console) = logger_data.console {
@@ -276,7 +277,7 @@ impl AsyncLogger {
 
     // 刷新日志的控制台和文件缓存
     fn flush_inner(&self) {
-        let mut logger_data = self.logger_data.lock().unwrap();
+        let mut logger_data = self.logger_data.lock();
 
         if let Some(ref mut console) = logger_data.console {
             console.flush().expect("flush log console error");
@@ -307,7 +308,7 @@ impl log::Log for AsyncLogger {
             format!("[{}] [{:5}] - {}\n", now, record.level(), record.args())
         };
 
-        let logger_data = self.logger_data.lock().unwrap();
+        let logger_data = self.logger_data.lock();
         // 采用独立的单线程写入日志的方式，向channel发送要写入的日志消息即可
         if let Some(ref sender) = logger_data.sender {
             sender.send(AsyncLogType::Message(msg)).unwrap();
@@ -320,7 +321,7 @@ impl log::Log for AsyncLogger {
     }
 
     fn flush(&self) {
-        let logger_data = self.logger_data.lock().unwrap();
+        let logger_data = self.logger_data.lock();
         if let Some(ref sender) = logger_data.sender {
             sender.send(AsyncLogType::Flush).unwrap();
         } else {

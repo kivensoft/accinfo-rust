@@ -135,17 +135,22 @@ macro_rules! appconfig_define {
         }
 
         impl $struct_name {
+            #[cfg(debug_assertions)]
             fn init() -> &'static mut Self {
                 unsafe {
-                    if cfg!(debug_assertions) {
-                        static mut FLAG: bool = false;
-                        if FLAG {
-                            panic!("The global variable has already been initialized, and reinitialization is not allowed");
-                        }
-                        FLAG = true;
+                    static mut FLAG: bool = false;
+                    if FLAG {
+                        panic!("The global variable has already been initialized, and reinitialization is not allowed");
                     }
+                    FLAG = true;
+                    println!("debug_assertions!!!!!!!!");
                     __APP_CONFIG.write(Self::default())
                 }
+            }
+
+            #[cfg(not(debug_assertions))]
+            fn init() -> &'static mut Self {
+                unsafe { __APP_CONFIG.write(Self::default()) }
             }
 
             fn get() -> &'static Self {

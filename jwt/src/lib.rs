@@ -102,6 +102,10 @@ pub fn encode(claims: &Value, key: &str, issuer: &str, exp: u64) -> Result<Strin
 /// }), "password", "my_app_name", 86400).unwrap();
 /// ```
 pub fn encode_with_rsa(claims: &Value, issuer: &str, exp: u64) -> Result<String> {
+    encode_with_rsa_key(claims, issuer, exp, rsa_key_data::RSA_PRIVATE_KEY)
+}
+
+pub fn encode_with_rsa_key(claims: &Value, issuer: &str, exp: u64, private_key: &str) -> Result<String> {
     // 复制claims，并添加 issuer 和 exp 属性，形成最终的 claims 条目
     debug_assert!(claims.is_null() || claims.is_object());
     let mut claims = match claims {
@@ -123,7 +127,7 @@ pub fn encode_with_rsa(claims: &Value, issuer: &str, exp: u64) -> Result<String>
     //    1. 先用 sha256 计算 header_base64 + "." + claims_base64 的结果
     //    2. 再用 rsa sign 计算上一个步骤的结果
     //    3. 把rsa计算结果用base64编码，就是最终的签名
-    let pri_key = RsaPrivateKey::from_pkcs1_pem(rsa_key_data::RSA_PRIVATE_KEY)?;
+    let pri_key = RsaPrivateKey::from_pkcs1_pem(private_key)?;
     let rsa_sign = SigningKey::<Sha256>::new_with_prefix(pri_key.clone());
     let sign_bs = rsa_sign.sign(jwt_data.as_bytes());
     let sign_b64 = general_purpose::URL_SAFE_NO_PAD.encode(&sign_bs);
@@ -217,6 +221,10 @@ pub fn decode(jwt: &str, key: &str, issuer: &str) -> Result<Value> {
 /// assert_eq!("kiven", s["user"].as_str());
 /// ```
 pub fn decode_with_rsa(jwt: &str, issuer: &str) -> Result<Value> {
+    decode_with_rsa_key(jwt, issuer, rsa_key_data::RSA_PUBLIC_KEY)
+}
+
+pub fn decode_with_rsa_key(jwt: &str, issuer: &str, public_key: &str) -> Result<Value> {
     // 把jwt按‘.'分为3段
     let (header_claims_b64, sign_b64) = match jwt.rfind('.') {
         Some(n) => (jwt.get(..n).unwrap(), jwt.get(n+1..).unwrap()),
@@ -240,7 +248,7 @@ pub fn decode_with_rsa(jwt: &str, issuer: &str) -> Result<Value> {
 
     // 校验签名是否正确
     let sign_bs = general_purpose::URL_SAFE_NO_PAD.decode(sign_b64)?;
-    let pub_key = RsaPublicKey::from_pkcs1_pem(rsa_key_data::RSA_PUBLIC_KEY)?;
+    let pub_key = RsaPublicKey::from_pkcs1_pem(public_key)?;
     let rsa_verify = VerifyingKey::<Sha256>::new_with_prefix(pub_key);
     if let Err(e) = rsa_verify.verify(header_claims_b64.as_bytes(), &sign_bs.into_boxed_slice().into()) {
         log::trace!("jwt Signature verification failed: {e}");
