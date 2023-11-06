@@ -9,19 +9,6 @@ use rust_embed::RustEmbed;
 #[exclude = "js/*"]
 struct Asset;
 
-fn map_content_type(file_type: &str) -> &'static str {
-    match file_type {
-        "html" => "text/html",
-        "css"  => "text/css",
-        "js"   => "application/javascript",
-        "ico"  => "image/x-icon",
-        "png"  => "image/png",
-        "jpg"  => "image/jpeg",
-        "gif"  => "image/gif",
-        _      => "text/plain",
-    }
-}
-
 pub async fn default_handler(ctx: HttpContext) -> Result<Response> {
     assert!(ctx.req.uri().path().len() > 0);
     let ac = crate::AppConf::get();
@@ -50,4 +37,17 @@ pub async fn default_handler(ctx: HttpContext) -> Result<Response> {
         .header("Content-Type", map_content_type(ext))
         .body(hyper::Body::from(f.data))
         .map_err(|e| anyhow::anyhow!(e))
+}
+
+fn map_content_type(file_type: &str) -> &'static str {
+    match file_type {
+        "html" => "text/html",
+        "css"  => "text/css",
+        "js"   => "application/javascript",
+        "ico"  => "image/x-icon",
+        "png"  => "image/png",
+        "jpg"  => "image/jpeg",
+        "gif"  => "image/gif",
+        _      => "text/plain",
+    }
 }

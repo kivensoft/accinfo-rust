@@ -1,12 +1,20 @@
-mod localtime;
-pub use localtime::{LocalTime, datetime_format, DATETIME_FORMAT};
+use anyhow::Context;
+use compact_str::CompactString;
+use fnv::FnvHashMap;
+use hyper::{body::Buf, header::AsHeaderName, http::HeaderValue};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::Value;
+use thiserror::Error;
+use std::{
+    net::{Ipv4Addr, SocketAddr},
+    sync::{atomic::AtomicU32, Arc},
+    collections::HashMap, convert::Infallible
+};
 
-use std::sync::Arc;
-use hyper::body::Buf;
-use serde::{Serialize, Deserialize, de::DeserializeOwned};
-use anyhow::Result;
+pub use compact_str;
 
 /// Batch registration API interface
+///
 /// ## Example
 /// ```rust
 /// use anyhow::Result;
@@ -23,16 +31,18 @@ use anyhow::Result;
 /// ```
 #[macro_export]
 macro_rules! register_apis {
-    ($server:expr, $base:literal, $($path:literal : $handler:expr,)+) => {
-        $($server.register(String::from(concat!($base, $path)), $handler); )*
+    ($server:expr, $base:expr, $($path:literal : $handler:expr,)+) => {
+        $(
+            $server.register(&$crate::compact_str::format_compact!("{}{}",
+                $base, $path), $handler);
+        )*
     };
 }
 
 /// Error message response returned when struct fields is Option::None
+///
 /// ## Example
 /// ```rust
-/// use httpserver::check_required;
-///
 /// struct User {
 ///     name: Option<String>,
 ///     age: Option<u8>,
@@ -40,24 +50,24 @@ macro_rules! register_apis {
 ///
 /// let user = User { name: None, age: 48 };
 ///
-/// check_required!(user, name, age);
+/// httpserver::check_required!(user, name, age);
 /// ```
 #[macro_export]
 macro_rules! check_required {
     ($val:expr, $($attr:tt),+) => {
         $(
             if $val.$attr.is_none() {
-                return $crate::ResBuiler::fail(&format!("{} can't be null", stringify!($attr)));
+                return $crate::Resp::fail(&$crate::compact_str::format_compact!(
+                    "{}{}", stringify!($attr), " can't be null"));
             }
         )*
     };
 }
 
 /// Error message response returned when struct fields is Option::None
+///
 /// ## Example
 /// ```rust
-/// use httpserver::assign_required;
-///
 /// struct User {
 ///     name: Option<String>,
 ///     age: Option<u8>,
@@ -65,7 +75,7 @@ macro_rules! check_required {
 ///
 /// let user = User { name: String::from("kiven"), age: 48 };
 ///
-/// let (name, age) = assign_required!(user, name, age);
+/// let (name, age) = httpserver::assign_required!(user, name, age);
 ///
 /// assert_eq!("kiven", name);
 /// assert_eq!(48, age);
@@ -73,18 +83,21 @@ macro_rules! check_required {
 #[macro_export]
 macro_rules! assign_required {
     ($val:expr, $($attr:tt),+) => {
-        {
+        let ($($attr,)*) = (
             $(
-                if $val.$attr.is_none() {
-                    return $crate::ResBuiler::fail(&format!("{} can't be null", stringify!($attr)));
-                }
+                match &$val.$attr {
+                    Some(v) => v,
+                    None => return $crate::Resp::fail(
+                        &$crate::compact_str::format_compact!(
+                            "{}{}", stringify!($attr), " can't be null")),
+                },
             )*
-            ( $( &$val.$attr.unwrap(),)* )
-        }
+        );
     };
 }
 
 /// Error message response returned when expression is true
+///
 /// ## Example
 /// ```rust
 /// use httpserver::fail_if;
@@ -97,12 +110,34 @@ macro_rules! assign_required {
 macro_rules! fail_if {
     ($b:expr, $msg:literal) => {
         if $b {
-            return $crate::ResBuiler::fail($msg);
+            return $crate::Resp::fail($msg);
         }
     };
     ($b:expr, $($t:tt)+) => {
         if $b {
-            return $crate::ResBuiler::fail(&format!($($t)*));
+            return $crate::Resp::fail(&$crate::compact_str::format_compact!($($t)*));
+        }
+    };
+}
+
+/// Error message response returned when ApiResult.is_fail() == true
+///
+/// ## Example
+/// ```rust
+/// use httpserver::fail_if_api;
+///
+/// let f = || {
+///     let ar = ApiResult::fail("open database error");
+///     fail_if_api!(ar);
+///     Resp::ok_with_empty()
+/// }
+/// assert_eq!(f(), Resp::fail_with_api_result(ApiResult::fail("open database error")));
+/// ```
+#[macro_export]
+macro_rules! fail_if_api {
+    ($ar:expr) => {
+        if $ar.is_fail() {
+            return $crate::Resp::fail_with_api_result($ar);
         }
     };
 }
@@ -115,8 +150,8 @@ macro_rules! fail_if {
 ///
 /// let a = assign_if!(true, 52, 42);
 /// let b = assign_if!(false, 52, 42);
-/// assert_eq(52, a);
-/// assert_eq(42, b);
+/// assert_eq!(52, a);
+/// assert_eq!(42, b);
 /// ```
 #[macro_export]
 macro_rules! assign_if {
@@ -125,10 +160,163 @@ macro_rules! assign_if {
     };
 }
 
+/// Conditional assignment, similar to the ternary operator
+///
+///  ## Example
+/// ```rust
+/// use httpserver::assign_if;
+///
+/// let a = || api_fail_if!(true, "err");
+/// let b = ApiResult::fail("err");
+/// assert_eq!(a(), b);
+/// ```
+#[macro_export]
+macro_rules! api_fail_if {
+    ($b:expr, $msg:literal) => {
+        if $b {
+            return $crate::ApiResult::fail(String::from($msg));
+        }
+    };
+    ($b:expr, $($t:tt)+) => {
+        if $b {
+            return $crate::ApiResult::fail(format!($($t)*));
+        }
+    };
+}
 
-/// API interface returns data format
+/// Conditional assignment, similar to the ternary operator
+///
+///  ## Example
+/// ```rust
+/// use httpserver::assign_if;
+///
+/// let a = || api_fail_if!(true, "err");
+/// let b = ApiResult::fail("err");
+/// assert_eq!(a(), Ok(b));
+/// ```
+#[macro_export]
+macro_rules! result_api_fail_if {
+    ($b:expr, $msg:literal) => {
+        if $b {
+            return Ok($crate::ApiResult::fail(String::from($msg)));
+        }
+    };
+    ($b:expr, $($t:tt)+) => {
+        if $b {
+            return Ok($crate::ApiResult::fail(format!($($t)*)));
+        }
+    };
+}
+
+/// check Result type, if Err(e) then log error and
+/// return Resp::internal_server_error()
+///
+///  ## Example
+/// ```rust
+/// use httpserver::assign_if;
+///
+/// let f = || { Err("abc") }
+/// check_result!(f());
+/// ```
+#[macro_export]
+macro_rules! check_result {
+    ($op: expr) => {
+        match $op {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("{:?}", e);
+                return Resp::internal_server_error();
+            }
+        }
+    };
+    ($op: expr, $msg:literal) => {
+        match $op {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("{}: {:?}", $msg, e);
+                return Resp::internal_server_error();
+            }
+        }
+    };
+}
+
+/// await and check Result type, if Err(e) then log error and
+/// return Resp::internal_server_error()
+///  ## Example
+/// ```rust
+/// use httpserver::await_result;
+///
+/// let f = || async { Err("abc") }
+/// await_result!(f());
+/// ```
+#[macro_export]
+macro_rules! await_result {
+    ($op: expr) => {
+        match $op.await {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("{:?}", e);
+                return Resp::internal_server_error();
+            }
+        }
+    };
+    ($op: expr, $msg:literal) => {
+        match $op.await {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("{}: {:?}", $msg, e);
+                return Resp::internal_server_error();
+            }
+        }
+    };
+}
+
+/// http header "Content-Type"
+pub const CONTENT_TYPE: &str = "Content-Type";
+/// http header "applicatoin/json; charset=UTF-8"
+pub const APPLICATION_JSON: &'static str = "applicatoin/json; charset=UTF-8";
+
+/// Simplified declaration
+pub type Request = hyper::Request<hyper::Body>;
+pub type Response = hyper::Response<hyper::Body>;
+pub type HttpResult = anyhow::Result<Response>;
+pub type BoxHttpHandler = Box<dyn HttpHandler>;
+
+type HttpCtxAttrs = Option<HashMap<CompactString, Value>>;
+type Router = FnvHashMap<CompactString, BoxHttpHandler>;
+
+
+#[derive(Error, Debug)]
+pub enum HttpCtxError {
+    #[error("the request body is empty")]
+    EmptyBody,
+    #[error("read request body error")]
+    ReadBody(#[from] hyper::Error),
+    #[error(transparent)]
+    DecodeJsonError(#[from] serde_json::error::Error),
+}
+
+/// use for HttpServer.run_with_callback
+#[async_trait::async_trait]
+pub trait RunCallback {
+    async fn handle(self) -> anyhow::Result<()>;
+}
+
+/// api function interface
+#[async_trait::async_trait]
+pub trait HttpHandler: Send + Sync + 'static {
+    async fn handle(&self, ctx: HttpContext) -> HttpResult;
+}
+
+/// middleware interface
+#[async_trait::async_trait]
+pub trait HttpMiddleware: Send + Sync + 'static {
+    async fn handle<'a>(&'a self, ctx: HttpContext, next: Next<'a>) -> HttpResult;
+}
+
+/// Universal API interface returns data format
 #[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
+// #[serde(rename_all = "camelCase")]
 pub struct ApiResult<T> {
     pub code: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -137,14 +325,77 @@ pub struct ApiResult<T> {
     pub data: Option<T>,
 }
 
-pub type Request = hyper::Request<hyper::Body>;
-pub type Response = hyper::Response<hyper::Body>;
-
+/// api function param
 pub struct HttpContext {
-    pub req: Request,
-    pub addr: std::net::SocketAddr,
-    pub id: u16,
+    pub req   : Request,         // 请求对象
+    pub addr  : SocketAddr,      // 请求客户端ip地址
+    pub id    : u32,             // 请求id(每个请求id唯一)
+    pub uid   : u32,             // 当前登录用户id(从token中解析, 未登录为0)
+    pub attrs : HttpCtxAttrs, // 附加属性(用户自定义)
 }
+
+/// Build http response object
+pub struct Resp;
+
+/// http request process object
+pub struct Next<'a> {
+    pub endpoint: &'a dyn HttpHandler,
+    pub next_middleware: &'a [Arc<dyn HttpMiddleware>],
+}
+
+/// Log middleware
+pub struct AccessLog;
+
+/// http server
+pub struct HttpServer {
+    prefix: CompactString,
+    router: Router,
+    middlewares: Vec<Arc<dyn HttpMiddleware>>,
+    default_handler: BoxHttpHandler,
+}
+
+impl <T> ApiResult<T> {
+    pub fn ok(data: T) -> Self {
+        Self {
+            code: 200,
+            message: None,
+            data: Some(data),
+        }
+    }
+
+    pub fn ok_with_empty() -> Self {
+        Self {
+            code: 200,
+            message: None,
+            data: None,
+        }
+    }
+
+    pub fn fail(msg: String) -> Self {
+        Self {
+            code: 500,
+            message: Some(msg),
+            data: None,
+        }
+    }
+
+    pub fn fail_with_code(code: u32, msg: String) -> Self {
+        Self {
+            code,
+            message: Some(msg),
+            data: None,
+        }
+    }
+
+    pub fn is_ok(&self) -> bool {
+        self.code == 200
+    }
+
+    pub fn is_fail(&self) -> bool {
+        self.code != 200
+    }
+}
+
 
 impl HttpContext {
 
@@ -152,33 +403,29 @@ impl HttpContext {
     ///
     /// Returns:
     ///
-    /// **Ok(val)**: body isn't empty and parse success, **Err(e)**: parse error
+    /// **Ok(val)**: body parse success
+    ///
+    /// **Err(e)**: parse error
     ///
     ///  ## Example
     /// ```rust
-    /// use anyhow::Result;
-    /// use httpserver::{HttpContext, Response, ResBuiler};
-    /// use serde::Deserialize;
+    /// use httpserver::{HttpContext, Response, Resp};
     ///
-    /// #[derive(Deserialize)]
+    /// #[derive(serde::Deserialize)]
     /// struct ReqParam {
     ///     user: Option<String>,
     ///     pass: Option<String>,
     /// }
     ///
-    /// async fn ping(ctx: HttpContext) -> Result<Response> {
+    /// async fn ping(ctx: HttpContext) -> anyhow::Result<Response> {
     ///     let req_param = ctx.into_json::<ReqParam>().await?;
-    ///     ResBuiler::ok_with_empty()
+    ///     Resp::ok_with_empty()
     /// }
     /// ```
-    pub async fn into_json<T: DeserializeOwned>(self) -> Result<T> {
-        let body = hyper::body::aggregate(self.req).await?;
-        match serde_json::from_reader(body.reader()) {
-            Ok(v) => Ok(v),
-            Err(e) => {
-                log::info!("decode http body to json error: {e:?}");
-                anyhow::bail!("parse request data failed")
-            },
+    pub async fn into_json<T: DeserializeOwned>(self) -> Result<T, HttpCtxError> {
+        match self.into_opt_json().await? {
+            Some(v) => Ok(v),
+            None => Err(HttpCtxError::EmptyBody),
         }
     }
 
@@ -186,49 +433,84 @@ impl HttpContext {
     ///
     /// Returns:
     ///
-    /// **Ok(None)**: body is empty, **Ok(Some(val))**: body isn't empty, **Err(e)**: parse error
+    /// **Ok(Some(val))**: parse body success
+    ///
+    /// **Ok(None)**: body is empty
+    ///
+    /// **Err(e)**: parse error
     ///
     ///  ## Example
     /// ```rust
-    /// use anyhow::Result;
-    /// use httpserver::{HttpContext, Response, ResBuiler};
-    /// use serde::Deserialize;
+    /// use httpserver::{HttpContext, Response, Resp};
     ///
-    /// #[derive(Deserialize)]
+    /// #[derive(serde::Deserialize)]
     /// struct ReqParam {
     ///     user: Option<String>,
     ///     pass: Option<String>,
     /// }
     ///
-    /// async fn ping(ctx: HttpContext) -> Result<Response> {
+    /// async fn ping(ctx: HttpContext) -> anyhow::Result<Response> {
     ///     let req_param = ctx.into_option_json::<ReqParam>().await?;
-    ///     ResBuiler::ok_with_empty()
+    ///     Resp::ok_with_empty()
     /// }
     /// ```
-    pub async fn into_option_json<T: DeserializeOwned>(self) -> Result<Option<T>> {
+    pub async fn into_opt_json<T: DeserializeOwned>(self) -> Result<Option<T>, HttpCtxError> {
         let body = hyper::body::aggregate(self.req).await?;
-        if body.remaining() > 0 {
-            match serde_json::from_reader(body.reader()) {
-                Ok(v) => Ok(Some(v)),
-                Err(e) => {
-                    log::info!("decode http body to json error: {e:?}");
-                    anyhow::bail!("parse request data failed")
-                },
-            }
+        if body.has_remaining() {
+            Ok(serde_json::from_reader(body.reader())?)
         } else {
             Ok(None)
         }
     }
 
+    /// 获取客户端的真实ip, 获取优先级为X-Real-IP > X-Forwarded-For > socketaddr
+    pub fn remote_ip(&self) -> Ipv4Addr {
+        if let Some(ip) = self.req.headers().get("X-Real-IP") {
+            if let Ok(ip) = ip.to_str() {
+                if let Ok(ip) = ip.parse() {
+                    return ip;
+                }
+            }
+        }
+
+        if let Some(ip) = self.req.headers().get("X-Forwarded-For") {
+            if let Ok(ip) = ip.to_str() {
+                if let Some(ip) = ip.split(',').next() {
+                    if let Ok(ip) = ip.parse() {
+                        return ip;
+                    }
+                }
+            }
+        }
+
+        match self.addr.ip() {
+            std::net::IpAddr::V4(ip) => ip,
+            _ => std::net::Ipv4Addr::new(0, 0, 0, 0),
+        }
+    }
+
+    pub fn header<K: AsHeaderName>(&self, key: K) -> Option<&HeaderValue> {
+        self.req.headers().get(key)
+    }
+
+    pub fn attr(&self, key: &str) -> Option<&Value> {
+        match &self.attrs {
+            Some(atrr) => atrr.get(key),
+            None => None,
+        }
+    }
+
+    pub fn set_attr<T: Into<Value>>(&mut self, key: CompactString, value: T) {
+        if self.attrs.is_none() {
+            self.attrs = Some(HashMap::default());
+        }
+        self.attrs.as_mut().unwrap().insert(key, value.into());
+    }
+
 }
 
-macro_rules! to_json_body {
-    ($($t:tt)+) => { hyper::Body::from(format!("{}", serde_json::json!($($t)*)))};
-}
 
-pub struct ResBuiler;
-
-impl ResBuiler {
+impl Resp {
 
     /// Create a reply message with the specified status code and content
     ///
@@ -240,9 +522,9 @@ impl ResBuiler {
     /// # Examples
     ///
     /// ```
-    /// use httpserver::ResBuilder;
+    /// use httpserver::Resp;
     ///
-    /// ResBuiler::resp(hyper::StatusCode::Ok, hyper::Body::from(format!("{}",
+    /// Resp::resp(hyper::StatusCode::Ok, hyper::Body::from(format!("{}",
     ///     serde_json::json!({
     ///         "code": 200,
     ///             "data": {
@@ -252,12 +534,11 @@ impl ResBuiler {
     ///     })
     /// ))?;
     /// ````
-    pub fn resp(status: hyper::StatusCode, body: hyper::Body) -> Result<Response> {
-        hyper::Response::builder()
+    pub fn resp(status: hyper::StatusCode, body: hyper::Body) -> HttpResult {
+        Ok(hyper::Response::builder()
             .status(status)
-            .header("Content-Type", "applicatoin/json; charset=UTF-8")
-            .body(body)
-            .map_err(|e| anyhow::anyhow!(e))
+            .header(CONTENT_TYPE, APPLICATION_JSON)
+            .body(body).context("response build error")?)
     }
 
     /// Create a reply message with 200
@@ -265,9 +546,9 @@ impl ResBuiler {
     /// # Examples
     ///
     /// ```
-    /// use httpserver::ResBuilder;
+    /// use httpserver::Resp;
     ///
-    /// ResBuiler::resp_ok(hyper::Body::from(format!("{}",
+    /// Resp::resp_ok(hyper::Body::from(format!("{}",
     ///     serde_json::json!({
     ///         "code": 200,
     ///             "data": {
@@ -277,15 +558,14 @@ impl ResBuiler {
     ///     })
     /// ))?;
     /// ````
-    pub fn resp_ok(body: hyper::Body) -> Result<Response> {
-        hyper::Response::builder()
-            .header("Content-Type", "applicatoin/json; charset=UTF-8")
-            .body(body)
-            .map_err(|e| anyhow::anyhow!(e))
+    pub fn resp_ok(body: hyper::Body) -> HttpResult {
+        Ok(hyper::Response::builder()
+            .header(CONTENT_TYPE, APPLICATION_JSON)
+            .body(body).context("response build error")?)
     }
 
     /// Create a reply message with 200, response body is empty
-    pub fn ok_with_empty() -> Result<Response> {
+    pub fn ok_with_empty() -> HttpResult {
         Self::resp_ok(hyper::Body::from(r#"{"code":200}"#))
     }
 
@@ -294,9 +574,9 @@ impl ResBuiler {
     /// # Examples
     ///
     /// ```
-    /// use httpserver::ResBuilder;
+    /// use httpserver::Resp;
     ///
-    /// ResBuiler::ok(&serde_json::json!({
+    /// Resp::ok(&serde_json::json!({
     ///     "code": 200,
     ///         "data": {
     ///             "name":"kiven",
@@ -304,8 +584,19 @@ impl ResBuiler {
     ///         },
     /// }))?;
     /// ````
-    pub fn ok<T: ?Sized + Serialize>(data: &T) -> Result<Response> {
-        Self::resp_ok(to_json_body!({"code": 200, "data": data}))
+    pub fn ok<T: ?Sized + Serialize>(data: &T) -> HttpResult {
+        Self::ok_option(Some(data))
+    }
+
+    pub fn ok_option<T: ?Sized + Serialize>(data: Option<&T>) -> HttpResult {
+        // Self::resp_ok(to_json_body!({"code": 200, "data": data}))
+        Self::resp_ok(hyper::Body::from(
+            serde_json::to_vec(&ApiResult {
+                code: 200,
+                message: None,
+                data,
+            })?
+        ))
     }
 
     /// Create a reply message with http status 500
@@ -313,11 +604,11 @@ impl ResBuiler {
     /// # Examples
     ///
     /// ```
-    /// use httpserver::ResBuilder;
+    /// use httpserver::Resp;
     ///
-    /// ResBuiler::fail("required field `username`")?;
+    /// Resp::fail("required field `username`")?;
     /// ````
-    pub fn fail(message: &str) -> Result<Response> {
+    pub fn fail(message: &str) -> HttpResult {
         Self::fail_with_code(500, message)
     }
 
@@ -326,12 +617,12 @@ impl ResBuiler {
     /// # Examples
     ///
     /// ```
-    /// use httpserver::ResBuilder;
+    /// use httpserver::Resp;
     ///
-    /// ResBuiler::fail_with_code(10086, "required field `username`")?;
+    /// Resp::fail_with_code(10086, "required field `username`")?;
     /// ````
-    pub fn fail_with_code(code: u32, message: &str) -> Result<Response> {
-        Self::resp_ok(to_json_body!({"code": code, "message": message}))
+    pub fn fail_with_code(code: u32, message: &str) -> HttpResult {
+        Self::fail_with_status(hyper::StatusCode::INTERNAL_SERVER_ERROR, code, message)
     }
 
     /// Create a reply message with specified http status and error code
@@ -339,49 +630,59 @@ impl ResBuiler {
     /// # Examples
     ///
     /// ```
-    /// use httpserver::ResBuilder;
+    /// use httpserver::Resp;
     ///
-    /// ResBuiler::fail_with_status(hyper::StatusCode::INTERNAL_SERVER_ERROR,
+    /// Resp::fail_with_status(hyper::StatusCode::INTERNAL_SERVER_ERROR,
     ///         10086, "required field `username`")?;
     /// ````
-    pub fn fail_with_status(status: hyper::StatusCode, code: u32, message: &str) -> Result<Response> {
-        Self::resp(status, to_json_body!({"code": code, "message": message}))
+    pub fn fail_with_status(status: hyper::StatusCode, code: u32, message: &str) -> HttpResult {
+        // Self::resp(status, to_json_body!({"code": code, "message": message}))
+        Self::resp(status, hyper::Body::from(
+            serde_json::to_vec(&ApiResult::<&str> {
+                code,
+                message: Some(String::from(message)),
+                data: None,
+            })?
+        ))
     }
 
+    pub fn fail_with_api_result<T>(ar: &ApiResult<T>) -> HttpResult {
+        Self::fail_with_code(ar.code, ar.message.as_ref().unwrap())
+    }
+
+    pub fn internal_server_error() -> HttpResult {
+        Self::fail("internal server error")
+    }
 }
+
 
 #[async_trait::async_trait]
-pub trait HttpHandler: Send + Sync + 'static {
-    async fn handle(&self, ctx: HttpContext) -> Result<Response>;
+impl<FN: Send + Sync + 'static, Fut> RunCallback for FN
+where
+    FN: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<()>> + Send + 'static,
+{
+    async fn handle(self) -> anyhow::Result<()> {
+        self().await
+    }
 }
 
-type BoxHttpHandler = Box<dyn HttpHandler>;
 
+/// Definition of callback functions for API interface functions
 #[async_trait::async_trait]
 impl<FN: Send + Sync + 'static, Fut> HttpHandler for FN
-        where
-            FN: Fn(HttpContext) -> Fut,
-            Fut: std::future::Future<Output = Result<Response>> + Send + 'static, {
-
-    async fn handle(&self, ctx: HttpContext) -> Result<Response> {
+where
+    FN: Fn(HttpContext) -> Fut,
+    Fut: std::future::Future<Output = HttpResult> + Send + 'static,
+{
+    async fn handle(&self, ctx: HttpContext) -> HttpResult {
         self(ctx).await
     }
 }
 
-type Router = std::collections::HashMap<String, BoxHttpHandler>;
-
-#[async_trait::async_trait]
-pub trait HttpMiddleware: Send + Sync + 'static {
-    async fn handle<'a>(&'a self, ctx: HttpContext, next: Next<'a>) -> Result<Response>;
-}
-
-pub struct Next<'a> {
-    pub endpoint: &'a dyn HttpHandler,
-    pub next_middleware: &'a [Arc<dyn HttpMiddleware>],
-}
 
 impl<'a> Next<'a> {
-    pub async fn run(mut self, ctx: HttpContext) -> Result<Response> {
+    pub async fn run(mut self, ctx: HttpContext) -> HttpResult {
         if let Some((current, next)) = self.next_middleware.split_first() {
             self.next_middleware = next;
             current.handle(ctx, self).await
@@ -391,56 +692,32 @@ impl<'a> Next<'a> {
     }
 }
 
-/// Log middleware
-pub struct AccessLog;
-
-impl AccessLog {
-    fn get_remote_ip(ctx: &HttpContext) -> std::net::Ipv4Addr {
-        if let Some(ip) = ctx.req.headers().get("X-Real-IP") {
-            if let Ok(ip) = ip.to_str() {
-                if let Ok(ip) = ip.parse() {
-                    return ip;
-                }
-            }
-        }
-        match ctx.addr.ip() {
-            std::net::IpAddr::V4(ip) => ip,
-            _ => std::net::Ipv4Addr::new(0, 0, 0, 0),
-        }
-    }
-}
 
 #[async_trait::async_trait]
 impl HttpMiddleware for AccessLog {
-    async fn handle<'a>(&'a self, ctx: HttpContext, next: Next<'a>) -> Result<Response> {
+    async fn handle<'a>(&'a self, ctx: HttpContext, next: Next<'a>) -> HttpResult {
         let start = std::time::Instant::now();
-        let ip = Self::get_remote_ip(&ctx);
-        let method = ctx.req.method().to_string();
-        let path = ctx.req.uri().path().to_string();
+        let ip = ctx.remote_ip();
+        let id = ctx.id;
+        let method = ctx.req.method().clone();
+        let path = CompactString::new(ctx.req.uri().path());
+        log::debug!("[{id:08x}] {method} \x1b[33m{path}\x1b[0m");
 
         let res = next.run(ctx).await;
         let ms = start.elapsed().as_millis();
         match &res {
             Ok(res) => {
-                if log::log_enabled!(log::Level::Debug) {
-                    let c = if res.status() == hyper::StatusCode::OK { 2 } else { 3 };
-                    let c2 = if ms < 100 { 6 } else { 5 };
-                    log::debug!("{method} \x1b[34m{path} \x1b[3{c}m{} \x1b[3{c2}m{ms}\x1b[0mms client: {ip}",
-                            res.status().as_str());
-                }
+                let c = assign_if!(res.status() == hyper::StatusCode::OK, 2, 1);
+                log::info!("[{id:08x}] {method} \x1b[34m{path} \x1b[3{c}m{}\x1b[0m {ms}ms, client: {ip}",
+                    res.status().as_u16());
             },
-            Err(e)  => log::error!("{method} \x1b[34m{path} \x1b[36m{ms}\x1b[0mms error: \x1b[31m{e}\x1b[0m"),
+            Err(e)  => log::error!("[{id:08x}] {method} \x1b[34m{path}\x1b[0m \x1b[31m500\x1b[0m {ms}ms, error: {e:?}"),
         };
 
         res
     }
 }
 
-pub struct HttpServer {
-    router: Router,
-    middlewares: Vec<Arc<dyn HttpMiddleware>>,
-    default_handler: BoxHttpHandler,
-}
 
 impl HttpServer {
 
@@ -450,13 +727,14 @@ impl HttpServer {
     ///
     /// * `use_access_log`: set Log middleware if true
     ///
-    pub fn new(use_access_log: bool) -> Self {
-        let mut middlewares: Vec<Arc<dyn HttpMiddleware>> = Vec::new();
+    pub fn new(prefix: &str, use_access_log: bool) -> Self {
+        let mut middlewares = Vec::<Arc<dyn HttpMiddleware>>::new();
         if use_access_log {
             middlewares.push(Arc::new(AccessLog));
         }
         HttpServer {
-            router: std::collections::HashMap::new(),
+            prefix: CompactString::new(prefix),
+            router: FnvHashMap::default(),
             middlewares,
             default_handler: Box::new(Self::handle_not_found),
         }
@@ -468,6 +746,7 @@ impl HttpServer {
     ///
     /// * `handler`: The default function when no matching interface function is found
     ///
+    #[inline]
     pub fn default_handler(&mut self, handler: impl HttpHandler) {
         self.default_handler = Box::new(handler);
     }
@@ -478,13 +757,16 @@ impl HttpServer {
     ///
     /// * `path`: api path
     /// * `handler`: handle of api function
-    pub fn register(&mut self, path: String, handler: impl HttpHandler) {
-        self.router.insert(path, Box::new(handler));
+    #[inline]
+    pub fn register(&mut self, path: &str, handler: impl HttpHandler) {
+        self.router.insert(CompactString::new(path), Box::new(handler));
     }
 
     /// register middleware
-    pub fn middleware(&mut self, middleware: impl HttpMiddleware) {
-        self.middlewares.push(Arc::new(middleware));
+    pub fn middleware<T: HttpMiddleware> (&mut self, middleware: T) -> Arc<T> {
+        let res = Arc::new(middleware);
+        self.middlewares.push(res.clone());
+        res
     }
 
     /// run http service and enter message loop mode
@@ -492,17 +774,22 @@ impl HttpServer {
     /// Arguments:
     ///
     /// * `addr`: listen addr
+    #[inline]
     pub async fn run(self, addr: std::net::SocketAddr) -> anyhow::Result<()> {
-        use std::convert::Infallible;
+        self.run_with_callbacck(addr, || async { Ok(()) }).await
+    }
 
-        struct ServerData {
-            server: HttpServer,
-            id: std::sync::atomic::AtomicU16,
-        }
-        let data = Arc::new(ServerData {
-            server: self,
-            id: std::sync::atomic::AtomicU16::new(0),
-        });
+    /// run http service and enter message loop mode
+    ///
+    /// Arguments:
+    ///
+    /// * `addr`: listen addr
+    /// * `f`: Fn() -> anyhow::Result<()>
+    pub async fn run_with_callbacck(self, addr: std::net::SocketAddr, f: impl RunCallback) -> anyhow::Result<()> {
+
+        struct ServerData { server: HttpServer, id: AtomicU32 }
+
+        let data = Arc::new(ServerData { server: self, id: AtomicU32::new(0) });
 
         let make_svc = hyper::service::make_service_fn(|conn: &hyper::server::conn::AddrStream| {
             let data = data.clone();
@@ -513,14 +800,20 @@ impl HttpServer {
                     let data = data.clone();
 
                     async move {
-                        let path = req.uri().path().to_owned();
-                        let endpoint = match data.server.router.get(&path) {
-                            Some(handler) => &**handler,
+                        let path = req.uri().path();
+                        let endpoint = match data.server.find_http_handler(path) {
+                            Some(handler) => handler,
                             None => data.server.default_handler.as_ref(),
                         };
                         let next = Next { endpoint, next_middleware: &data.server.middlewares };
-                        let id = data.id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        let ctx = HttpContext { req, addr, id };
+
+                        let ctx = HttpContext {
+                            req,
+                            addr,
+                            id: data.id.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+                            uid: 0,
+                            attrs: None,
+                        };
 
                         let resp = match next.run(ctx).await {
                             Ok(resp) => resp,
@@ -533,28 +826,56 @@ impl HttpServer {
             }
         });
 
-        let server = hyper::Server::bind(&addr).serve(make_svc);
-        log::info!("Started http server on \x1b[34m{addr}\x1b[0m");
+        let server = hyper::Server::try_bind(&addr)
+                .with_context(|| format!("bind sockaddr {addr} fail"))?
+                .serve(make_svc);
 
-        server.await.map_err(|e| anyhow::Error::new(e).context("http server running error"))
+        f.handle().await?;
+
+        log::info!("Startup http server on \x1b[34m{addr}\x1b[0m");
+        Ok(server.await?)
     }
 
-    async fn handle_not_found(_ctx: HttpContext) -> Result<Response> {
-        ResBuiler::fail_with_status(hyper::StatusCode::NOT_FOUND, 404, "Not Found")
+    fn find_http_handler(&self, path: &str) -> Option<&dyn HttpHandler> {
+        // 前缀不匹配
+        if !self.prefix.is_empty() && !path.starts_with(self.prefix.as_str()) {
+            return None;
+        }
+
+        // 找到直接匹配的路径
+        let mut path = CompactString::new(&path[self.prefix.len()..]);
+        if let Some(handler) = self.router.get(&path) {
+            return Some(handler.as_ref());
+        }
+
+        // 尝试递归上级路径查找带路径参数的接口
+        while let Some(pos) = path.rfind('/') {
+            path.truncate(pos + 1);
+            path.push('*');
+
+            if let Some(handler) = self.router.get(&path) {
+                return Some(handler.as_ref());
+            }
+
+            path.truncate(path.len() - 2);
+        }
+
+        None
     }
 
     fn handle_error(err: anyhow::Error) -> Response {
-        ResBuiler::fail(&err.to_string()).unwrap()
+        match Resp::fail(&err.to_string()) {
+            Ok(val) => val,
+            Err(e) => {
+                log::error!("handle_error except: {e:?}");
+                let mut res = hyper::Response::new(hyper::Body::from("internal server error"));
+                *res.status_mut() = hyper::StatusCode::INTERNAL_SERVER_ERROR;
+                res
+            }
+        }
     }
 
-    pub fn concat_path(path1: &str, path2: &str) -> String {
-        let mut s = String::with_capacity(path1.len() + path2.len() + 1);
-        s.push_str(path1);
-        if s.as_bytes()[s.len() - 1] != b'/' {
-            s.push('/');
-        }
-        let path2 = if path2.as_bytes()[0] != b'/' { path2 } else { &path2[1..] };
-        s.push_str(path2);
-        return s;
+    async fn handle_not_found(_: HttpContext) -> HttpResult {
+        Ok(Resp::fail_with_status(hyper::StatusCode::NOT_FOUND, 404, "Not Found")?)
     }
 }

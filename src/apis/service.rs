@@ -1,15 +1,14 @@
 use std::{sync::Arc, path::Path};
-use anyhow::Result;
-use chrono::{Local, Duration};
-use httpserver::{HttpContext, ResBuiler, Response, LocalTime};
+use httpserver::{HttpContext, Resp, HttpResult};
+use localtime::LocalTime;
 use serde::{Serialize, Deserialize};
 use parking_lot::Mutex;
-use crate::{aidb, apis::authentication::Authentication, SESS_EXP_SECS};
+use crate::{aidb, apis::authentication::Authentication, AppGlobal, unix_timestamp};
 
 static PASSWORD: Mutex<String> = Mutex::new(String::new());
 
-pub async fn ping(ctx: HttpContext) -> Result<Response> {
-    #[derive(Deserialize)] struct ReqParam { reply: Option<String> }
+pub async fn ping(ctx: HttpContext) -> HttpResult {
+    #[derive(Deserialize, Default)] struct ReqParam { reply: Option<String> }
 
     #[derive(Serialize)]
     struct ResData {
@@ -25,21 +24,20 @@ pub async fn ping(ctx: HttpContext) -> Result<Response> {
         }
     }
 
+    let req_param = ctx.into_opt_json::<ReqParam>().await?.unwrap_or_default();
+    let reply = req_param.reply.unwrap_or_else(|| "pong".to_owned());
     let now = LocalTime::now();
     let server = format!("{}/{}", crate::APP_NAME, crate::APP_VER);
-    let reply = match ctx.into_option_json::<ReqParam>().await? {
-        Some(ping_params) => ping_params.reply,
-        None => None,
-    }.unwrap_or("pong".to_owned());
 
-    ResBuiler::ok(&ResData { reply, now, server })
+    Resp::ok(&ResData { reply, now, server })
 }
 
-pub async fn login(ctx: HttpContext) -> Result<Response> {
+/// 登录接口
+pub async fn login(ctx: HttpContext) -> HttpResult {
     #[derive(Deserialize)]
     struct ReqParam {
-        user: Option<String>,
-        pass: Option<String>,
+        user: String,
+        pass: String,
     }
 
     #[derive(Serialize)]
@@ -51,7 +49,7 @@ pub async fn login(ctx: HttpContext) -> Result<Response> {
     }
 
     let req_param = ctx.into_json::<ReqParam>().await?;
-    let (user, pass) = httpserver::assign_required!(req_param, user, pass);
+    let (user, pass) = (&req_param.user, &req_param.pass);
 
     let ac = crate::AppConf::get();
     let fpath = Path::new(&ac.database);
@@ -69,14 +67,21 @@ pub async fn login(ctx: HttpContext) -> Result<Response> {
     drop(p);
 
     let token = Authentication::session_id()?;
-    let expire = LocalTime::from(Local::now() + Duration::seconds(SESS_EXP_SECS));
-    let refresh_time = LocalTime::from(Local::now() + Duration::seconds(SESS_EXP_SECS / 2));
+    let now = unix_timestamp() as i64;
+    let expire = LocalTime::from_unix_timestamp(now + AppGlobal::get().session_expire as i64);
+    let refresh_time = LocalTime::from_unix_timestamp(now + AppGlobal::get().session_expire as i64 / 2);
 
-    ResBuiler::ok(&ResData { token, expire, refresh_time })
+    Resp::ok(&ResData { token, expire, refresh_time })
 }
 
+/// 退出登录接口
+pub async fn logout(ctx: HttpContext) -> HttpResult {
+    Authentication::remove_session_id(&ctx);
+    Resp::ok_with_empty()
+}
 
-pub async fn list(ctx: HttpContext) -> Result<Response> {
+/// 数据查询接口
+pub async fn list(ctx: HttpContext) -> HttpResult {
     #[derive(Deserialize)]
     struct ReqParam {
         q: Option<String>,
@@ -88,7 +93,7 @@ pub async fn list(ctx: HttpContext) -> Result<Response> {
         records: aidb::Records,
     }
 
-    let req_param = ctx.into_option_json::<ReqParam>().await?;
+    let req_param = ctx.into_opt_json::<ReqParam>().await?;
     let ac = crate::AppConf::get();
     let pass = PASSWORD.lock();
     let recs = crate::aidb::load_database(&ac.database, pass.as_str())?;
@@ -109,5 +114,5 @@ pub async fn list(ctx: HttpContext) -> Result<Response> {
     }
 
     let total = vec_record.len();
-    ResBuiler::ok(&ResData{records: Arc::from(vec_record), total})
+    Resp::ok(&ResData{records: Arc::from(vec_record), total})
 }

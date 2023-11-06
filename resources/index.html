@@ -60,17 +60,6 @@
                   <td colspan="4"><pre style="word-wrap: break-word; white-space: pre-wrap;" x-text="rec.notes"></pre></td>
                 </tr>
               </template>
-              <tr>
-                <td class="has-text-primary-dark" x-text="rec.title"></td>
-                <td class="has-text-warning-dark" x-text="rec.user"></td>
-                <td class="has-text-danger-dark" x-text="rec.pass"></td>
-                <td class="has-text-link" x-text="rec.url"></td>
-              </tr>
-              <template x-if="rec.notes != ''">
-                <tr>
-                  <td colspan="4"><pre style="word-wrap: break-word; white-space: pre-wrap;" x-text="rec.notes"></pre></td>
-                </tr>
-              </template>
             </tbody>
           </template>
         </table>
@@ -86,12 +75,12 @@
         <div class="column">
           <input autofocus class="input is-primary" type="text" placeholder="用户名" x-model="username"
             x-ref="user" @keyup.enter="$refs.pwd.focus()">
-          <div class="has-text-danger is-size-7" x-show="requireUsername">必须输入用户名</div>
+          <div class="has-text-danger is-size-7" x-show="reqUser">必须输入用户名</div>
         </div>
         <div class="column">
           <input class="input is-primary" type="password" placeholder="密码" x-model="password"
             x-ref="pwd" @keyup.enter="login">
-          <div class="has-text-danger is-size-7" x-show="requirePassword">必须输入密码</div>
+          <div class="has-text-danger is-size-7" x-show="reqPass">必须输入密码</div>
         </div>
         <div class="column">
           <button class="button is-primary is-fullwidth" type="submit" @click="login">登录</button>
@@ -114,9 +103,6 @@
           body = JSON.stringify(body)
 
         const rep = await fetch(url, { headers, body, method: 'POST' })
-        // if (rep.status != 200)
-        //   throw rep.statusText
-
         const json = await rep.json()
         if (json.code != 200)
           window.alert(json.message)
@@ -135,11 +121,11 @@
       // login page
       username: null,
       password: null,
-      requireUsername: false,
-      requirePassword: false,
+      reqUser: false,
+      reqPass: false,
 
       mounted: function() {
-        if (this.getAccessToken())
+        if (this.getToken())
           this.page = "home"
         else
           this.$refs.user.focus()
@@ -147,11 +133,11 @@
 
       login: function () {
         // 输入校验
-        this.requireUsername = !this.username;
-        this.requirePassword = !this.password;
-        if (this.requireUsername || this.requirePassword) return;
+        this.reqUser = !this.username;
+        this.reqPass = !this.password;
+        if (this.reqUser || this.reqPass) return;
           apiPost('/api/login', {user: this.username, pass: this.password}, null, (res) => {
-            this.setAccessToken(res.token, res.expire)
+            this.setToken(res.token, res.expire)
             this.username = null
             this.password = null
             this.page = 'home'
@@ -159,27 +145,27 @@
       },
 
       // 退出登录
-      logout() {
+      logout: function () {
+        apiPost("/api/logout", null, this.getToken(), (res) => {});
         this.token = null;
         window.sessionStorage.removeItem(ACCESS_TOKEN_NAME);
-        this.requireUsername = false,
-        this.requirePassword = false,
+        this.reqUser = false,
+        this.reqPass = false,
         this.records = []
         this.findStr = ''
         this.page = 'login'
       },
 
       // 查找
-      search() {
+      search: function () {
         const q = this.findStr.trim();
-        const token = this.getAccessToken();
-        apiPost("/api/list", {q}, token, (res) => {
+        apiPost("/api/list", {q}, this.getToken(), (res) => {
           this.records = res.records
         })
       },
 
       // 保存token到sessionStorage
-      setAccessToken(token, exp) {
+      setToken: function (token, exp) {
         this.token = {
           accessToken: token,
           exp: new Date(exp),
@@ -188,12 +174,13 @@
       },
 
       // 从sessionStorage中获取token
-      getAccessToken() {
+      getToken: function () {
         if (!this.token) {
           const tokenStr = window.sessionStorage.getItem(ACCESS_TOKEN_NAME)
           if (tokenStr) {
             token = JSON.parse(tokenStr)
             if (token && token.accessToken && token.exp)
+              token.exp = new Date(token.exp)
               this.token = token
           }
         }
