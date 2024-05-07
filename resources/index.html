@@ -14,19 +14,19 @@
 
     <!-- 首页 -->
     <div x-show="page == 'home'" class="container-fluid">
-      <nav class="level p-3 mb-2 has-background-success-light">
-        <div class="level-left">
+      <nav class="level is-mobile p-3 mb-2 has-background-success-light">
+        <!-- <div class="level-left"> -->
           <div class="level-item">
             <p class="subtitle is-5 has-text-weight-bold">个人账户信息管理</p>
           </div>
-        </div>
+        <!-- </div> -->
 
         <div class="level-right">
           <p class="level-item"><a class="button is-small is-info is-rounded" @click="logout">退出登录</a></p>
         </div>
       </nav>
 
-      <nav class="level">
+      <nav class="level is-mobile">
         <div class="level-left ml-4">
           <input x-model="findStr" @keyup.enter="search"
                 class="input is-primary is-small is-rounded" type="text"

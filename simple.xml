@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<KeePassFile>
+	<Meta>
+		<Generator>KeePass</Generator>
+		<DatabaseName>演示密码库</DatabaseName>
+		<DatabaseNameChanged>2016-06-28T14:46:34Z</DatabaseNameChanged>
+		<DatabaseDescription />
+		<DatabaseDescriptionChanged>2016-06-28T14:45:13Z</DatabaseDescriptionChanged>
+		<DefaultUserName>kiven</DefaultUserName>
+		<DefaultUserNameChanged>2016-06-28T14:46:34Z</DefaultUserNameChanged>
+		<MaintenanceHistoryDays>365</MaintenanceHistoryDays>
+		<Color />
+		<MasterKeyChanged>2016-06-28T14:45:13Z</MasterKeyChanged>
+		<MasterKeyChangeRec>-1</MasterKeyChangeRec>
+		<MasterKeyChangeForce>-1</MasterKeyChangeForce>
+		<MemoryProtection>
+			<ProtectTitle>False</ProtectTitle>
+			<ProtectUserName>False</ProtectUserName>
+			<ProtectPassword>True</ProtectPassword>
+			<ProtectURL>False</ProtectURL>
+			<ProtectNotes>False</ProtectNotes>
+		</MemoryProtection>
+		<RecycleBinEnabled>True</RecycleBinEnabled>
+		<RecycleBinUUID>N73/UhBbIUKCwYZQ9uEnZw==</RecycleBinUUID>
+		<RecycleBinChanged>2016-06-28T14:45:13Z</RecycleBinChanged>
+		<EntryTemplatesGroup>AAAAAAAAAAAAAAAAAAAAAA==</EntryTemplatesGroup>
+		<EntryTemplatesGroupChanged>2016-06-28T14:45:13Z</EntryTemplatesGroupChanged>
+		<HistoryMaxItems>10</HistoryMaxItems>
+		<HistoryMaxSize>6291456</HistoryMaxSize>
+		<LastSelectedGroup>AAAAAAAAAAAAAAAAAAAAAA==</LastSelectedGroup>
+		<LastTopVisibleGroup>GYmo7juMYU2uvRigJlmLHA==</LastTopVisibleGroup>
+		<Binaries />
+		<CustomData />
+	</Meta>
+	<Root>
+		<Group>
+			<UUID>GYmo7juMYU2uvRigJlmLHA==</UUID>
+			<Name>kiven</Name>
+			<Notes />
+			<IconID>49</IconID>
+			<Times>
+				<CreationTime>2016-06-28T14:45:13Z</CreationTime>
+				<LastModificationTime>2016-06-28T14:45:13Z</LastModificationTime>
+				<LastAccessTime>2023-08-17T00:48:27Z</LastAccessTime>
+				<ExpiryTime>2016-06-28T14:41:52Z</ExpiryTime>
+				<Expires>False</Expires>
+				<UsageCount>190</UsageCount>
+				<LocationChanged>2016-06-28T14:45:13Z</LocationChanged>
+			</Times>
+			<IsExpanded>True</IsExpanded>
+			<DefaultAutoTypeSequence />
+			<EnableAutoType>null</EnableAutoType>
+			<EnableSearching>null</EnableSearching>
+			<LastTopVisibleEntry>GswbeLOXR0+W2Ks3nP9dKA==</LastTopVisibleEntry>
+			<Entry>
+				<UUID>XIff0vhhhECNV7/VLvhFyw==</UUID>
+				<IconID>1</IconID>
+				<ForegroundColor />
+				<BackgroundColor />
+				<OverrideURL />
+				<Tags />
+				<Times>
+					<CreationTime>2016-06-28T14:47:53Z</CreationTime>
+					<LastModificationTime>2016-06-28T14:50:41Z</LastModificationTime>
+					<LastAccessTime>2023-03-29T15:04:54Z</LastAccessTime>
+					<ExpiryTime>2016-06-28T14:41:52Z</ExpiryTime>
+					<Expires>False</Expires>
+					<UsageCount>6</UsageCount>
+					<LocationChanged>2016-06-28T16:30:18Z</LocationChanged>
+				</Times>
+				<String>
+					<Key>Notes</Key>
+					<Value />
+				</String>
+				<String>
+					<Key>Password</Key>
+					<Value ProtectInMemory="True">123456</Value>
+				</String>
+				<String>
+					<Key>Title</Key>
+					<Value>微软</Value>
+				</String>
+				<String>
+					<Key>URL</Key>
+					<Value>https://live.com</Value>
+				</String>
+				<String>
+					<Key>UserName</Key>
+					<Value>user@gmail.com</Value>
+				</String>
+				<AutoType>
+					<Enabled>True</Enabled>
+					<DataTransferObfuscation>0</DataTransferObfuscation>
+				</AutoType>
+				<History />
+			</Entry>
+			<Entry>
+				<UUID>yziolD1eJ0a92jbxKMv5ag==</UUID>
+				<IconID>1</IconID>
+				<ForegroundColor />
+				<BackgroundColor />
+				<OverrideURL />
+				<Tags />
+				<Times>
+					<CreationTime>2016-06-28T14:50:51Z</CreationTime>
+					<LastModificationTime>2019-09-10T06:37:44Z</LastModificationTime>
+					<LastAccessTime>2023-03-29T15:04:59Z</LastAccessTime>
+					<ExpiryTime>2016-06-28T14:41:52Z</ExpiryTime>
+					<Expires>False</Expires>
+					<UsageCount>4</UsageCount>
+					<LocationChanged>2016-06-28T16:30:18Z</LocationChanged>
+				</Times>
+				<String>
+					<Key>Notes</Key>
+					<Value />
+				</String>
+				<String>
+					<Key>Password</Key>
+					<Value ProtectInMemory="True">password</Value>
+				</String>
+				<String>
+					<Key>Title</Key>
+					<Value>钉钉</Value>
+				</String>
+				<String>
+					<Key>URL</Key>
+					<Value>http://www.dingtalk.com</Value>
+				</String>
+				<String>
+					<Key>UserName</Key>
+					<Value>testuser</Value>
+				</String>
+				<AutoType>
+					<Enabled>True</Enabled>
+					<DataTransferObfuscation>0</DataTransferObfuscation>
+				</AutoType>
+				<History />
+			</Entry>
+			<Entry>
+				<UUID>XBSFBf8saEqMCDYOjOqBaQ==</UUID>
+				<IconID>1</IconID>
+				<ForegroundColor />
+				<BackgroundColor />
+				<OverrideURL />
+				<Tags />
+				<Times>
+					<CreationTime>2016-06-28T14:52:02Z</CreationTime>
+					<LastModificationTime>2017-05-09T09:03:08Z</LastModificationTime>
+					<LastAccessTime>2023-03-29T15:04:56Z</LastAccessTime>
+					<ExpiryTime>2016-06-28T14:41:52Z</ExpiryTime>
+					<Expires>False</Expires>
+					<UsageCount>5</UsageCount>
+					<LocationChanged>2016-06-28T16:30:18Z</LocationChanged>
+				</Times>
+				<String>
+					<Key>Notes</Key>
+					<Value />
+				</String>
+				<String>
+					<Key>Password</Key>
+					<Value ProtectInMemory="True">myname</Value>
+				</String>
+				<String>
+					<Key>Title</Key>
+					<Value>企业钉钉</Value>
+				</String>
+				<String>
+					<Key>URL</Key>
+					<Value>http://www.dingtalk.com</Value>
+				</String>
+				<String>
+					<Key>UserName</Key>
+					<Value>batast</Value>
+				</String>
+				<AutoType>
+					<Enabled>True</Enabled>
+					<DataTransferObfuscation>0</DataTransferObfuscation>
+				</AutoType>
+				<History />
+			</Entry>
+		</Group>
+	</Root>
+</KeePassFile>

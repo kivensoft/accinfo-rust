@@ -1,9 +1,11 @@
 use std::{io::{Write, Read}, sync::Arc};
+
+use anyhow_ext::{anyhow, bail, Result};
+use parking_lot::Mutex;
 use serde::{Serialize, Deserialize};
 use quick_xml::{events::Event, reader::Reader};
 use md5::{Md5, Digest, Md5Core, digest::Output};
 use aes::cipher::{KeyIvInit, StreamCipher};
-use parking_lot::Mutex;
 
 type Aes128Ctr64LE = ctr::Ctr64LE<aes::Aes128>;
 
@@ -33,13 +35,11 @@ const MAGIC_LEN: usize = 4;
 const HEADER_LEN: usize = MAGIC_LEN + 4;
 const ATTACH_LEN: usize = HEADER_LEN + 16;
 
-lazy_static::lazy_static! {
-    static ref G_RECS: Mutex<Option<CacheRecord>> = Mutex::new(None);
-}
+static REC_CACHE: Mutex<Option<CacheRecord>> = Mutex::new(None);
 
 
 pub fn recycle_cache(expire: std::time::Duration) {
-    let mut g_recs = G_RECS.lock();
+    let mut g_recs = REC_CACHE.lock();
     if let Some(recs) = g_recs.as_ref() {
         if recs.time.elapsed() > expire {
             g_recs.take();
@@ -53,7 +53,7 @@ pub fn recycle_cache(expire: std::time::Duration) {
 /// * `xml_file`: The xml file exported from keepass
 /// * `password`: Database password
 /// * `out_file`: Output aidb database filename
-pub fn encrypt_database(xml_file: &str, password: &str, out_file: &str) -> anyhow::Result<()> {
+pub fn encrypt_database(xml_file: &str, password: &str, out_file: &str) -> Result<()> {
     let xdata = std::fs::read(xml_file)?;
     let recs = load_xml(&xdata)?;
     log::trace!("{xml_file} record total: {}", recs.len());
@@ -85,8 +85,8 @@ pub fn encrypt_database(xml_file: &str, password: &str, out_file: &str) -> anyho
 ///
 /// * `aidb`: Database file name
 /// * `password`: Database password
-pub fn load_database(aidb: &str, password: &str) -> anyhow::Result<Records> {
-    let mut g_recs = G_RECS.lock();
+pub fn load_database(aidb: &str, password: &str) -> Result<Records> {
+    let mut g_recs = REC_CACHE.lock();
     if let Some(ref mut recs) = *g_recs {
         recs.time = std::time::Instant::now();
         return Ok(recs.data.clone());
@@ -94,17 +94,17 @@ pub fn load_database(aidb: &str, password: &str) -> anyhow::Result<Records> {
 
     let mut buf = std::fs::read(aidb)?;
     if buf.len() < ATTACH_LEN {
-        anyhow::bail!("database size too small");
+        bail!("database size too small");
     }
     if MAGIC != &buf[..MAGIC_LEN] {
-        anyhow::bail!("database is not aidb format");
+        bail!("database is not aidb format");
     }
     let len = ((buf[4] as u32) << 24) | ((buf[5] as u32) << 16) | ((buf[6] as u32) << 8) | (buf[7] as u32);
     if (len as usize) != buf.len() - ATTACH_LEN {
-        anyhow::bail!("database size format error");
+        bail!("database size format error");
     }
     if md5_password(password).as_slice() != &buf[HEADER_LEN..ATTACH_LEN] {
-        anyhow::bail!("password error");
+        bail!("password error");
     }
 
     aes_decrypt(password.as_bytes(), &mut buf[ATTACH_LEN..]);
@@ -130,23 +130,23 @@ pub fn load_database(aidb: &str, password: &str) -> anyhow::Result<Records> {
 /// Returns:
 ///
 /// Ok(true): 密码正确, Ok(false) 密码错误, Err(e): 其它错误
-pub fn check_password(aidb: &str, password: &str) -> anyhow::Result<bool> {
+pub fn check_password(aidb: &str, password: &str) -> Result<bool> {
     let mut f = std::fs::File::open(aidb)?;
     let flen = f.metadata()?.len();
 
     if (flen as usize) < ATTACH_LEN {
-        anyhow::bail!("database size too small");
+        bail!("database size too small");
     }
 
     let mut buf = [0_u8; ATTACH_LEN];
-    f.read(&mut buf)?;
+    f.read_exact(&mut buf)?;
     if MAGIC != &buf[..MAGIC_LEN] {
-        anyhow::bail!("database is not aidb format");
+        bail!("database is not aidb format");
     }
 
     let len = ((buf[4] as u32) << 24) | ((buf[5] as u32) << 16) | ((buf[6] as u32) << 8) | (buf[7] as u32);
     if (len as usize) != (flen as usize) - ATTACH_LEN {
-        anyhow::bail!("database size format error");
+        bail!("database size format error");
     }
 
     if md5_password(password).as_slice() != &buf[HEADER_LEN..ATTACH_LEN] {
@@ -172,7 +172,7 @@ impl MyAes {
     }
 }
 
-fn load_xml(xml: &[u8]) -> anyhow::Result<Vec<Record>> {
+fn load_xml(xml: &[u8]) -> Result<Vec<Record>> {
     // xml节点类型
     #[derive(PartialEq, Eq, Debug)]
     enum ElType { None, Entry, Id, String, Key, Value }
@@ -242,7 +242,7 @@ fn load_xml(xml: &[u8]) -> anyhow::Result<Vec<Record>> {
                 Event::Eof => break,
                 _ => {},
             },
-            Err(e) => return Err(anyhow::anyhow!("Error at position {}", reader.buffer_position()).context(e)),
+            Err(e) => return Err(anyhow!("Error at position {}", reader.buffer_position()).context(e)),
         }
     }
 

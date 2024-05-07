@@ -1,8 +1,6 @@
 mod apis;
 mod aidb;
 
-use std::time::SystemTime;
-
 use httpserver::HttpServer;
 use tokio::time;
 
@@ -12,7 +10,9 @@ macro_rules! arg_err {
     };
 }
 
-const APP_NAME: &str = "accinfo";   // 应用程序内部名称
+/// 应用程序内部名称
+const APP_NAME: &str = include_str!(concat!(env!("OUT_DIR"), "/.app_name"));
+
 /// app版本号, 来自编译时由build.rs从cargo.toml中读取的版本号(读取内容写入.version文件)
 const APP_VER: &str = include_str!(concat!(env!("OUT_DIR"), "/.version"));
 
@@ -35,7 +35,6 @@ appconfig::appconfig_define!(app_conf, AppConf,
     log_level     : String => ["L", "log-level",      "LogLevel",       "log level(trace/debug/info/warn/error/off)"],
     log_file      : String => ["F", "log-file",       "LogFile",        "log filename"],
     log_max       : String => ["M", "log-max",        "LogFileMaxSize", "log file max size (unit: k/m/g)"],
-    log_async     : bool   => ["",  "log-async",      "LogAsync",       "enable asynchronous logging"],
     no_console    : bool   => ["",  "no-console",     "NoConsole",      "prohibit outputting logs to the console"],
     threads       : String => ["t", "threads",        "Threads",        "set tokio runtime worker threads"],
     listen        : String => ["l", "listen",         "Listen",         "http service ip:port"],
@@ -54,7 +53,6 @@ impl Default for AppConf {
             log_level:      String::from("info"),
             log_file:       String::with_capacity(0),
             log_max:        String::from("10m"),
-            log_async:      false,
             no_console:     false,
             threads:        String::from("1"),
             listen:         String::from("0.0.0.0:8888"),
@@ -67,11 +65,6 @@ impl Default for AppConf {
             session_expire: String::from("1800"),
         }
     }
-}
-
-/// 获取当前时间基于UNIX_EPOCH的秒数
-fn unix_timestamp() -> u64 {
-    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs()
 }
 
 fn init() -> bool {
@@ -87,7 +80,7 @@ fn init() -> bool {
     }
 
     AppGlobal::init(AppGlobal {
-        startup_time: unix_timestamp(),
+        startup_time: localtime::unix_timestamp(),
         task_interval: ac.task_interval.parse().expect(arg_err!("task_interval")),
         cache_expire: ac.cache_expire.parse().expect(arg_err!("cache_expire")),
         session_expire: ac.session_expire.parse().expect(arg_err!("session_expire")),
@@ -97,15 +90,15 @@ fn init() -> bool {
         ac.listen.insert_str(0, "0.0.0.0");
     };
 
-    let log_level = asynclog::parse_level(&ac.log_level).expect("arg log-level format error");
-    let log_max = asynclog::parse_size(&ac.log_max).expect("arg log-max format error");
+    let log_level = asynclog::parse_level(&ac.log_level).expect(arg_err!("log-level"));
+    let log_max = asynclog::parse_size(&ac.log_max).expect(arg_err!("log-max"));
 
     if log_level == log::Level::Trace {
         println!("config setting: {ac:#?}\n");
     }
 
     asynclog::init_log(log_level, ac.log_file.clone(), log_max,
-        !ac.no_console, ac.log_async).expect("init log error");
+        !ac.no_console, true).expect("init log error");
     asynclog::set_level("mio".to_owned(), log::LevelFilter::Info);
     asynclog::set_level("want".to_owned(), log::LevelFilter::Info);
 
@@ -131,10 +124,11 @@ fn init() -> bool {
 fn main() {
     if !init() { return; }
 
-    let mut srv = HttpServer::new("/api/", true);
-
-    srv.default_handler(apis::default_handler);
-    srv.middleware(apis::Authentication);
+    let mut srv = HttpServer::new();
+    srv.set_content_path("/api");
+    srv.set_default_handler(apis::default_handler);
+    srv.set_middleware(httpserver::AccessLog);
+    srv.set_middleware(apis::Authentication);
 
     httpserver::register_apis!(srv, "",
         "ping": apis::ping,
@@ -165,32 +159,29 @@ fn main() {
     };
 
     let ac = AppConf::get();
-    let threads = ac.threads.parse::<usize>().expect("arg threads is not a number");
+    let threads = ac.threads.parse::<usize>().expect(arg_err!("threads"));
 
     #[cfg(not(feature = "multi_thread"))]
-    {
+    let mut builder = {
         assert!(threads == 1, "{APP_NAME} current version unsupport multi-threads");
-
         tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(async_fn);
-    }
+    };
 
     #[cfg(feature = "multi_thread")]
-    {
-        assert!(threads >= 0 && threads <= 256, "multi-threads range in 0-256");
+    let mut builder = {
+        assert!(threads <= 256, "multi-threads range in 0-256");
 
         let mut builder = tokio::runtime::Builder::new_multi_thread();
         if threads > 0 {
             builder.worker_threads(threads);
         }
 
-        builder.enable_all()
-            .build()
-            .unwrap()
-            .block_on(async_fn)
-    }
+        builder
+    };
+
+    builder.enable_all()
+        .build()
+        .unwrap()
+        .block_on(async_fn)
 
 }

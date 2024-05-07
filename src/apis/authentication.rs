@@ -1,6 +1,10 @@
-use std::{time::SystemTime, net::Ipv4Addr, collections::HashMap};
-use parking_lot::Mutex;
+use std::{
+    collections::HashMap, net::Ipv4Addr,
+    sync::{atomic::{AtomicU64, Ordering}, OnceLock}
+};
 
+use anyhow_ext::{bail, Result};
+use parking_lot::Mutex;
 use httpserver::{HttpContext, Resp, Response, Next};
 
 use crate::AppGlobal;
@@ -9,33 +13,35 @@ pub struct Authentication;
 
 type Sessions = HashMap<u64, u64>; // key: id, value: exp
 type CurrentLimitings = HashMap<u32, u32>; // key: ipv4, value: count
+type GlobalValue<T> = OnceLock<Mutex<T>>;
 
 const AUTHORIZATION: &str = "Authorization";
 const SESSION: &str = "session ";
 const MAX_CURRENT_LIMITING: u32 = 3;
 
-static mut STATIS_TIME: u64 = 0; // 限流统计时间，1分钟变更1次，按分钟限流
-
-lazy_static::lazy_static! {
-    static ref SESSIONS: Mutex<Sessions> = Mutex::new(HashMap::new());
-    static ref CURRENT_LIMITINGS: Mutex<CurrentLimitings> = Mutex::new(HashMap::new());
-}
+/// 限流统计时间(当前分钟)，1分钟变更1次，按分钟限流
+static STATIS_TIME: AtomicU64 = AtomicU64::new(0);
+/// 当前登录用户的session
+static SESSIONS: GlobalValue<Sessions> = OnceLock::new();
+/// 当前访问统计，用于限流
+static CURRENT_LIMITINGS: GlobalValue<CurrentLimitings> = OnceLock::new();
 
 
 impl Authentication {
     pub fn recycle() {
-        let mut sessions = SESSIONS.lock();
-        let now = Self::now();
-        let len = sessions.len();
+        let now = localtime::unix_timestamp();
+        let mut sessions = get_sessions().lock();
+        let old_len = sessions.len();
+        // 删除过期项
         sessions.retain(|_, v| *v > now);
-        if len > sessions.len() {
-            log::trace!("recycle {} session item", len - sessions.len());
+        if old_len > sessions.len() {
+            log::trace!("recycle {} session item", old_len - sessions.len());
         }
     }
 
     fn check_session(id: u64) -> bool {
-        let mut sessions = SESSIONS.lock();
-        let now = Self::now();
+        let mut sessions = get_sessions().lock();
+        let now = localtime::unix_timestamp();
         if let Some(exp) = sessions.get_mut(&id) {
             if *exp > now {
                 *exp = now + AppGlobal::get().session_expire;
@@ -47,19 +53,14 @@ impl Authentication {
     }
 
     fn require_authentication(path: &str) -> bool {
-        return path.starts_with("/api/") && path != "/api/ping"
+        path.starts_with("/api/") && path != "/api/ping"
                 && path != "/api/login" && path != "/api/logout"
     }
 
-    fn now() -> u64 {
-        SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)
-                .expect("Unable to calculate unix epoch").as_secs()
-    }
+    pub fn session_id() -> Result<String> {
+        const MAX_TRY: u16 = 10_000;
 
-    pub fn session_id() -> anyhow::Result<String> {
-        const MAX_TRY: usize = 10_000;
-
-        let mut sessions = SESSIONS.lock();
+        let mut sessions = get_sessions().lock();
         let mut id = rand::random::<u64>();
         let mut count = 0;
 
@@ -67,29 +68,27 @@ impl Authentication {
             if !sessions.contains_key(&id) { break; }
             id = rand::random();
             if count >= MAX_TRY {
-                anyhow::bail!("create session id has maximum try");
+                bail!("create session id has maximum try");
             }
             count += 1;
         }
 
-        let exp = Self::now() + AppGlobal::get().session_expire;
+        let exp = localtime::unix_timestamp() + AppGlobal::get().session_expire;
         sessions.insert(id, exp);
 
         Ok(format!("{:016x}", id))
     }
 
     fn check_limit(ip: Ipv4Addr) -> bool {
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("can't get unix epoch of Datetime")
-            .as_secs();
-        let statis_time = unsafe { STATIS_TIME };
+        let now = localtime::unix_timestamp();
+        let now_minute = now / 60;
+        let statis_time = STATIS_TIME.load(Ordering::Acquire);
 
-        let mut limits = CURRENT_LIMITINGS.lock();
+        let mut limits = get_current_limitings().lock();
 
         // 每隔1秒钟，重新计算限流值
-        if now > statis_time {
-            unsafe { STATIS_TIME = now };
+        if now_minute > statis_time {
+            STATIS_TIME.store(now_minute, Ordering::Release);
             limits.clear();
         }
 
@@ -103,8 +102,8 @@ impl Authentication {
     fn get_session_id(ctx: &HttpContext) -> Option<u64> {
         if let Some(auth) = ctx.req.headers().get(AUTHORIZATION) {
             if let Ok(auth) = auth.to_str() {
-                if auth.starts_with(SESSION) {
-                    if let Ok(id) = u64::from_str_radix(&auth[SESSION.len()..], 16) {
+                if let Some(session) = auth.strip_prefix(SESSION) {
+                    if let Ok(id) = u64::from_str_radix(session, 16) {
                         return Some(id);
                     }
                 }
@@ -115,7 +114,7 @@ impl Authentication {
 
     pub fn remove_session_id(ctx: &HttpContext) {
         if let Some(id) = Self::get_session_id(ctx) {
-            SESSIONS.lock().remove(&id);
+            get_sessions().lock().remove(&id);
         }
     }
 
@@ -123,7 +122,7 @@ impl Authentication {
 
 #[async_trait::async_trait]
 impl httpserver::HttpMiddleware for Authentication {
-    async fn handle<'a>(&'a self, ctx: HttpContext, next: Next<'a>) -> anyhow::Result<Response> {
+    async fn handle<'a>(&'a self, ctx: HttpContext, next: Next<'a>) -> Result<Response> {
         if !Self::require_authentication(ctx.req.uri().path()) {
             return next.run(ctx).await
         }
@@ -142,4 +141,12 @@ impl httpserver::HttpMiddleware for Authentication {
             hyper::StatusCode::UNAUTHORIZED.as_u16() as u32,
             hyper::StatusCode::UNAUTHORIZED.as_str())
     }
+}
+
+fn get_sessions() -> &'static Mutex<Sessions> {
+    SESSIONS.get_or_init(|| Mutex::new(Sessions::new()))
+}
+
+fn get_current_limitings() -> &'static Mutex<CurrentLimitings> {
+    CURRENT_LIMITINGS.get_or_init(|| Mutex::new(CurrentLimitings::new()))
 }

@@ -31,7 +31,7 @@
 `cargo build`
 ###### 运行
 1. 导出keepass的数据库，导出类型为xml（假设导出文件名为simple.xml）
-2. 转换xml为aidb并进行加密保存
+2. 转换xml为aidb并进行加密保存, 密码 12345678
    `accinfo -d simple.aidb -p 12345678 --encrypt simple.xml`
 3. 启动应用
    `accinfo -L debug -d simple.aidb`
